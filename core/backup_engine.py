@@ -4,6 +4,7 @@ Core backup engine with rolling backup support, compression, and deduplication
 """
 
 import os
+import re
 import shutil
 import json
 import hashlib
@@ -93,8 +94,56 @@ class BackupEngine:
         except Exception:
             pass
         return None
+
+    def _sanitize_folder_name(self, name: str) -> str:
+        """Create a filesystem-safe folder name from a game name."""
+        name = (name or "").strip()
+        if not name:
+            return ""
+        safe = re.sub(r"[^\w\s-]", "", name)
+        safe = re.sub(r"\s+", " ", safe).strip()
+        safe = safe.replace(" ", "_").strip("_-")
+        return safe[:40]
+
+    def _resolve_game_backup_dir(self, game_id: str, game_name: Optional[str]) -> Path:
+        """Prefer a readable folder name but keep legacy folders working."""
+        legacy_dir = self.backup_root / game_id
+        safe_name = self._sanitize_folder_name(game_name or "")
+        preferred_dir = self.backup_root / f"{safe_name}__{game_id}" if safe_name else legacy_dir
+
+        if preferred_dir.exists():
+            return preferred_dir
+
+        if legacy_dir.exists() and preferred_dir != legacy_dir:
+            try:
+                legacy_dir.rename(preferred_dir)
+                return preferred_dir
+            except Exception:
+                return legacy_dir
+
+        preferred_dir.mkdir(parents=True, exist_ok=True)
+        return preferred_dir
+
+    def _find_game_backup_dirs(self, game_id: str) -> List[Path]:
+        """Find all backup folders that belong to a game id."""
+        dirs = []
+        legacy_dir = self.backup_root / game_id
+        if legacy_dir.exists():
+            dirs.append(legacy_dir)
+        for candidate in self.backup_root.glob(f"*__{game_id}"):
+            if candidate.is_dir() and candidate not in dirs:
+                dirs.append(candidate)
+        return dirs
     
-    def backup_game(self, game_id: str, game_name: str, save_path: str, force: bool = False) -> Dict[str, Any]:
+    def backup_game(
+        self,
+        game_id: str,
+        game_name: str,
+        save_path: str,
+        force: bool = False,
+        display_name: Optional[str] = None,
+        collection_id: str = "default",
+    ) -> Dict[str, Any]:
         """
         Create a compressed backup of a game's save files with deduplication.
         
@@ -103,6 +152,8 @@ class BackupEngine:
             game_name: Display name of the game
             save_path: Path to the save files
             force: Force backup even if content is unchanged
+            display_name: Optional display name for the backup
+            collection_id: Optional collection identifier
             
         Returns:
             Dict with backup status and info
@@ -118,8 +169,7 @@ class BackupEngine:
             }
         
         # Create game backup directory
-        game_backup_dir = self.backup_root / game_id
-        game_backup_dir.mkdir(parents=True, exist_ok=True)
+        game_backup_dir = self._resolve_game_backup_dir(game_id, game_name)
         
         # Compute content hash for deduplication
         current_hash = self._compute_folder_hash(save_path)
@@ -143,6 +193,10 @@ class BackupEngine:
         zip_path = game_backup_dir / f"{backup_name}.zip"
         
         try:
+            display_name = (display_name or "").strip()
+            if not collection_id:
+                collection_id = "default"
+
             # Create metadata
             metadata = {
                 "game_id": game_id,
@@ -150,6 +204,8 @@ class BackupEngine:
                 "source_path": str(save_path),
                 "backup_time": datetime.now().isoformat(),
                 "backup_name": backup_name,
+                "display_name": display_name,
+                "collection_id": collection_id,
                 "content_hash": current_hash,
                 "compression": "zip"
             }
@@ -177,6 +233,8 @@ class BackupEngine:
                 "backup_path": str(zip_path),
                 "backup_name": backup_name,
                 "timestamp": timestamp,
+                "display_name": display_name,
+                "collection_id": collection_id,
                 "content_hash": current_hash,
                 "compressed_size": compressed_size,
                 "skipped": False
@@ -220,38 +278,49 @@ class BackupEngine:
     def get_backups(self, game_id: str) -> List[Dict[str, Any]]:
         """Get list of backups for a game"""
         
-        game_backup_dir = self.backup_root / game_id
-        if not game_backup_dir.exists():
+        game_backup_dirs = self._find_game_backup_dirs(game_id)
+        if not game_backup_dirs:
             return []
         
         backups = []
         
-        for item in sorted(game_backup_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-            metadata = None
-            
-            if item.suffix == '.zip':
-                # Read from zip
-                metadata = self._read_metadata_from_zip(item)
-                if metadata:
-                    metadata["path"] = str(item)
-                    metadata["size"] = item.stat().st_size
-                    metadata["is_compressed"] = True
-                    backups.append(metadata)
-            
-            elif item.is_dir():
-                # Read from folder
-                metadata_path = item / "_backup_info.json"
-                if metadata_path.exists():
-                    try:
-                        with open(metadata_path, "r", encoding="utf-8") as f:
-                            metadata = json.load(f)
+        for game_backup_dir in game_backup_dirs:
+            for item in sorted(game_backup_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+                metadata = None
+                item_stat = item.stat()
+                
+                if item.suffix == '.zip':
+                    # Read from zip
+                    metadata = self._read_metadata_from_zip(item)
+                    if metadata:
+                        metadata.setdefault("display_name", "")
+                        metadata.setdefault("collection_id", "default")
                         metadata["path"] = str(item)
-                        metadata["size"] = self._get_folder_size(item)
-                        metadata["is_compressed"] = False
+                        metadata["size"] = item_stat.st_size
+                        metadata["is_compressed"] = True
+                        metadata["_sort_mtime"] = item_stat.st_mtime
                         backups.append(metadata)
-                    except Exception:
-                        pass
+                
+                elif item.is_dir():
+                    # Read from folder
+                    metadata_path = item / "_backup_info.json"
+                    if metadata_path.exists():
+                        try:
+                            with open(metadata_path, "r", encoding="utf-8") as f:
+                                metadata = json.load(f)
+                            metadata.setdefault("display_name", "")
+                            metadata.setdefault("collection_id", "default")
+                            metadata["path"] = str(item)
+                            metadata["size"] = self._get_folder_size(item)
+                            metadata["is_compressed"] = False
+                            metadata["_sort_mtime"] = item_stat.st_mtime
+                            backups.append(metadata)
+                        except Exception:
+                            pass
         
+        backups.sort(key=lambda x: x.get("_sort_mtime", 0), reverse=True)
+        for backup in backups:
+            backup.pop("_sort_mtime", None)
         return backups
     
     def restore_backup(self, backup_path: str, target_path: str) -> Dict[str, Any]:
@@ -315,6 +384,66 @@ class BackupEngine:
                 "success": False,
                 "error": str(e)
             }
+
+    def rename_backup(
+        self,
+        backup_path: str,
+        display_name: str,
+        collection_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Update backup display name and/or collection metadata."""
+        backup_path = Path(backup_path)
+        if not backup_path.exists():
+            return {
+                "success": False,
+                "error": "Backup does not exist"
+            }
+
+        display_name = (display_name or "").strip()
+
+        if backup_path.suffix == ".zip":
+            metadata = self._read_metadata_from_zip(backup_path) or {}
+            metadata.setdefault("backup_name", backup_path.stem)
+            metadata.setdefault("backup_time", datetime.now().isoformat())
+            metadata["display_name"] = display_name
+            if collection_id is not None:
+                metadata["collection_id"] = collection_id or "default"
+
+            tmp_path = backup_path.with_name(backup_path.name + ".tmp")
+            try:
+                with zipfile.ZipFile(backup_path, "r") as src, zipfile.ZipFile(
+                    tmp_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9
+                ) as dst:
+                    for item in src.infolist():
+                        if item.filename == "_backup_info.json":
+                            continue
+                        dst.writestr(item, src.read(item.filename))
+                    dst.writestr("_backup_info.json", json.dumps(metadata, indent=2))
+                tmp_path.replace(backup_path)
+                return {"success": True, "error": None}
+            except Exception as e:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+                return {"success": False, "error": str(e)}
+
+        metadata_path = backup_path / "_backup_info.json"
+        metadata = {}
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+            except Exception:
+                metadata = {}
+        metadata["display_name"] = display_name
+        if collection_id is not None:
+            metadata["collection_id"] = collection_id or "default"
+
+        try:
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+            return {"success": True, "error": None}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     def delete_backup(self, backup_path: str) -> Dict[str, Any]:
         """Delete a specific backup"""

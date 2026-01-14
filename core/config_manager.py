@@ -12,6 +12,7 @@ DEFAULT_CONFIG = {
     "backup_directory": "",
     "max_backups": 10,
     "user_games": [],
+    "backup_collections": {},
     "theme": "dark",
     "first_run": True
 }
