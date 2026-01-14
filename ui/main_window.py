@@ -666,7 +666,7 @@ class GameVaultWindow(ctk.CTk):
 
         ctk.CTkButton(
             actions,
-            text="Create Quick Backup .bat",
+            text="Create Backup Script",
             command=lambda: self._generate_quick_backup_bat(game),
             height=40,
             font=ui_font(size=13),
