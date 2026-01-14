@@ -8,6 +8,8 @@ References:
 """
 
 import os
+import sys
+import platform
 import webbrowser
 import threading
 from datetime import datetime
@@ -53,6 +55,125 @@ BRAND_COLORS = {
 
 FONT_FAMILY = "Montserrat"
 
+APP_ICON_PNG_REL = "assets/GameVault.png"
+APP_ICON_ICO_CACHE_REL = "data/.cache/GameVault.ico"
+
+
+def resource_path(relative_path: str) -> Path:
+    """Resolve resource paths for dev + PyInstaller-style bundles."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+    return base / relative_path
+
+
+def ensure_app_icon_ico() -> Optional[Path]:
+    """Generate/update a cached .ico from the PNG for best Windows taskbar support."""
+    if platform.system().lower() != "windows":
+        return None
+
+    png_path = resource_path(APP_ICON_PNG_REL)
+    if not png_path.exists():
+        return None
+
+    ico_path = resource_path(APP_ICON_ICO_CACHE_REL)
+    try:
+        ico_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return None
+
+    try:
+        png_mtime = png_path.stat().st_mtime
+        ico_mtime = ico_path.stat().st_mtime if ico_path.exists() else 0
+    except OSError:
+        png_mtime = 0
+        ico_mtime = 0
+
+    if (not ico_path.exists()) or (ico_mtime < png_mtime):
+        try:
+            from PIL import Image  # type: ignore
+
+            with Image.open(png_path) as img:
+                img = img.convert("RGBA")
+                img.save(
+                    ico_path,
+                    format="ICO",
+                    sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)],
+                )
+        except Exception:
+            return None
+
+    return ico_path if ico_path.exists() else None
+
+
+def apply_app_icon(window: Any, *, set_default: bool = False) -> None:
+    """Apply GameVault icon to a Tk/CTk window (root + all dialogs)."""
+    png_path = resource_path(APP_ICON_PNG_REL)
+    if not png_path.exists():
+        return
+
+    ico_path = ensure_app_icon_ico()
+    if ico_path:
+        try:
+            window.iconbitmap(str(ico_path))
+        except Exception:
+            pass
+
+    # Keep a reference on the window object to prevent GC.
+    try:
+        from PIL import Image, ImageTk  # type: ignore
+
+        with Image.open(png_path) as image:
+            image_copy = image.copy()
+        window._window_icon_image = ImageTk.PhotoImage(image_copy)
+        window.iconphoto(bool(set_default), window._window_icon_image)
+        return
+    except Exception:
+        pass
+
+    try:
+        from tkinter import PhotoImage
+
+        window._window_icon_image = PhotoImage(file=str(png_path))
+        window.iconphoto(bool(set_default), window._window_icon_image)
+    except Exception:
+        return
+
+
+def schedule_app_icon(window: Any, *, set_default: bool = False) -> None:
+    """Apply icon multiple times to override CustomTkinter's delayed default icon."""
+    if getattr(window, "_gv_icon_schedule_done", False):
+        return
+    window._gv_icon_schedule_done = True
+
+    def apply_once() -> None:
+        apply_app_icon(window, set_default=set_default)
+
+    apply_once()
+    for delay_ms in (200, 700, 1500):
+        try:
+            window.after(delay_ms, apply_once)
+        except Exception:
+            pass
+
+
+def safe_close_toplevel(window: Any, *, delay_ms: int = 350) -> None:
+    """Close CTkToplevels safely (avoids CustomTkinter deiconify callbacks on destroyed windows)."""
+    try:
+        window.withdraw()
+    except Exception:
+        pass
+
+    def destroy_if_exists() -> None:
+        try:
+            if hasattr(window, "winfo_exists") and window.winfo_exists():
+                window.destroy()
+        except Exception:
+            pass
+
+    try:
+        window.after(delay_ms, destroy_if_exists)
+    except Exception:
+        destroy_if_exists()
+
 
 def ui_font(*args, **kwargs):
     """Return a CTkFont using the brand font by default."""
@@ -75,10 +196,11 @@ class GameVaultWindow(ctk.CTk):
         
         # Window setup
         self.title("GameVault")
+        schedule_app_icon(self, set_default=True)
         self.geometry("1000x700")
         self.minsize(800, 600)
         self.configure(fg_color=BRAND_COLORS["bg_dark"])
-        
+
         # Initialize managers
         self.config_manager = ConfigManager()
         self.config = self.config_manager.load_config()
@@ -98,6 +220,9 @@ class GameVaultWindow(ctk.CTk):
             self.after(100, self._show_setup_wizard)
         else:
             self._build_ui()
+
+    def _apply_window_icon(self) -> None:
+        schedule_app_icon(self, set_default=True)
     
     # ==========================================
     # SETUP WIZARD
@@ -326,6 +451,20 @@ class GameVaultWindow(ctk.CTk):
             anchor="w"
         )
         dev.pack(fill="x")
+
+        remove_btn = ctk.CTkButton(
+            inner,
+            text="×",
+            command=lambda g=game: self._remove_game(g),
+            width=28,
+            height=28,
+            font=ui_font(size=14, weight="bold"),
+            fg_color="transparent",
+            hover_color=BRAND_COLORS["accent_muted"],
+            text_color=BRAND_COLORS["text_muted"],
+            corner_radius=6,
+        )
+        remove_btn.pack(side="right", padx=(8, 0))
         
         status_dot = ctk.CTkFrame(
             inner,
@@ -532,18 +671,18 @@ class GameVaultWindow(ctk.CTk):
             text_color=status_color,
             anchor="w"
         ).pack(fill="x", pady=(4, 0))
-        
-        if not path_exists:
-            ctk.CTkButton(
-                path_inner,
-                text="Set Save Folder",
-                command=lambda g=game: self._set_save_path(g),
-                height=28,
-                font=ui_font(size=11, weight="bold"),
-                fg_color=BRAND_COLORS["accent"],
-                hover_color=BRAND_COLORS["accent_hover"],
-                corner_radius=6
-            ).pack(anchor="w", pady=(8, 0))
+
+        btn_text = "Change Save Folder" if path_exists else "Set Save Folder"
+        ctk.CTkButton(
+            path_inner,
+            text=btn_text,
+            command=lambda g=game: self._set_save_path(g),
+            height=28,
+            font=ui_font(size=11, weight="bold"),
+            fg_color=BRAND_COLORS["accent"],
+            hover_color=BRAND_COLORS["accent_hover"],
+            corner_radius=6
+        ).pack(anchor="w", pady=(8, 0))
         
         # Backups section
         ctk.CTkLabel(
@@ -748,6 +887,7 @@ class GameVaultWindow(ctk.CTk):
         progress = ctk.CTkToplevel(self)
         progress.title("Backing up...")
         progress.geometry("320x100")
+        schedule_app_icon(progress)
         progress.transient(self)
         progress.grab_set()
         progress.configure(fg_color=BRAND_COLORS["bg_dark"])
@@ -896,10 +1036,12 @@ class SetupWizard(ctk.CTkToplevel):
         
         self.title("Welcome to GameVault")
         self.geometry("500x400")
+        schedule_app_icon(self)
         self.transient(parent)
         self.grab_set()
         self.configure(fg_color=BRAND_COLORS["bg_dark"])
         self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self._safe_close)
         
         self.config = config.copy()
         self.result = None
@@ -1001,7 +1143,7 @@ class SetupWizard(ctk.CTkToplevel):
         ctk.CTkButton(
             btn_frame,
             text="Cancel",
-            command=self.destroy,
+            command=self._safe_close,
             width=100,
             height=40,
             font=ui_font(size=12),
@@ -1042,7 +1184,10 @@ class SetupWizard(ctk.CTkToplevel):
         
         self.config["backup_directory"] = backup_dir
         self.result = self.config
-        self.destroy()
+        self._safe_close()
+
+    def _safe_close(self):
+        safe_close_toplevel(self)
 
 
 # ==========================================
@@ -1056,10 +1201,12 @@ class AddGameDialog(ctk.CTkToplevel):
         
         self.title("Add Game")
         self.geometry("560x620")
+        schedule_app_icon(self)
         self.transient(parent)
         self.grab_set()
         self.configure(fg_color=BRAND_COLORS["bg_dark"])
         self.resizable(True, True)
+        self.protocol("WM_DELETE_WINDOW", self._safe_close)
         
         self.game_db = game_db
         self.result = None
@@ -1089,7 +1236,6 @@ class AddGameDialog(ctk.CTkToplevel):
             scrollbar_button_hover_color=BRAND_COLORS["border_hover"]
         )
         body.grid(row=0, column=0, sticky="nsew")
-        self._body_scroll = body
         
         # Header
         ctk.CTkLabel(
@@ -1152,90 +1298,43 @@ class AddGameDialog(ctk.CTkToplevel):
         self.suggestions_frame.pack(fill="x")
         
         self._populate_suggestions()
-        
-        # Manual entry
+
+        # Custom game CTA
         sep = ctk.CTkFrame(body, height=1, fg_color=BRAND_COLORS["border"])
         sep.pack(fill="x", pady=16)
-        
+
+        cta = ctk.CTkFrame(body, fg_color=BRAND_COLORS["bg_card"], corner_radius=8)
+        cta.pack(fill="x")
+
+        cta_inner = ctk.CTkFrame(cta, fg_color="transparent")
+        cta_inner.pack(fill="x", padx=16, pady=12)
+
         ctk.CTkLabel(
-            body,
-            text="Custom game (always allowed)",
+            cta_inner,
+            text="Can’t find your game?",
+            font=ui_font(size=12, weight="bold"),
+            text_color=BRAND_COLORS["text_secondary"],
+            anchor="w"
+        ).pack(fill="x")
+
+        ctk.CTkLabel(
+            cta_inner,
+            text="Add a custom game with your own save folder path.",
             font=ui_font(size=11),
             text_color=BRAND_COLORS["text_muted"],
             anchor="w"
-        ).pack(fill="x", pady=(0, 8))
-        
+        ).pack(fill="x", pady=(2, 10))
+
         ctk.CTkButton(
-            body,
-            text="Use Custom Fields",
-            command=self._use_custom_game,
-            height=28,
-            font=ui_font(size=11, weight="bold"),
+            cta_inner,
+            text="Add Custom Game",
+            command=self._open_custom_game_dialog,
+            height=32,
+            font=ui_font(size=12, weight="bold"),
             fg_color=BRAND_COLORS["accent"],
             hover_color=BRAND_COLORS["accent_hover"],
             corner_radius=6
-        ).pack(anchor="w", pady=(0, 12))
-        
-        # Name
-        name_row = ctk.CTkFrame(body, fg_color="transparent")
-        name_row.pack(fill="x")
-        
-        ctk.CTkLabel(
-            name_row,
-            text="Game Name *",
-            font=ui_font(size=11, weight="bold"),
-            text_color=BRAND_COLORS["text_muted"],
-            anchor="w"
-        ).pack(fill="x")
-        
-        self.name_entry = ctk.CTkEntry(
-            name_row,
-            height=36,
-            font=ui_font(size=12),
-            fg_color=BRAND_COLORS["bg_card"],
-            border_color=BRAND_COLORS["border"],
-            border_width=1
-        )
-        self.name_entry.pack(fill="x", pady=(4, 8))
-        self.name_entry.bind("<KeyRelease>", self._on_manual_edit)
-        
-        # Path
-        path_row = ctk.CTkFrame(body, fg_color="transparent")
-        path_row.pack(fill="x")
-        
-        ctk.CTkLabel(
-            path_row,
-            text="Save Folder Path *",
-            font=ui_font(size=11, weight="bold"),
-            text_color=BRAND_COLORS["text_muted"],
-            anchor="w"
-        ).pack(fill="x")
-        
-        path_input = ctk.CTkFrame(path_row, fg_color="transparent")
-        path_input.pack(fill="x", pady=(4, 0))
-        
-        self.path_entry = ctk.CTkEntry(
-            path_input,
-            height=36,
-            placeholder_text=r"e.g., %APPDATA%\GameName\Saves",
-            font=ui_font(size=12),
-            fg_color=BRAND_COLORS["bg_card"],
-            border_color=BRAND_COLORS["border"],
-            border_width=1
-        )
-        self.path_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.path_entry.bind("<KeyRelease>", self._on_manual_edit)
-        
-        ctk.CTkButton(
-            path_input,
-            text="Browse",
-            command=self._browse_path,
-            width=72,
-            height=36,
-            font=ui_font(size=11),
-            fg_color=BRAND_COLORS["bg_hover"],
-            hover_color=BRAND_COLORS["border_hover"]
-        ).pack(side="right")
+        ).pack(anchor="w")
         
         # Buttons
         btn_frame = ctk.CTkFrame(content, fg_color="transparent")
@@ -1244,7 +1343,7 @@ class AddGameDialog(ctk.CTkToplevel):
         ctk.CTkButton(
             btn_frame,
             text="Cancel",
-            command=self.destroy,
+            command=self._safe_close,
             width=100,
             height=40,
             font=ui_font(size=12),
@@ -1254,7 +1353,7 @@ class AddGameDialog(ctk.CTkToplevel):
         
         ctk.CTkButton(
             btn_frame,
-            text="Add Game",
+            text="Add Selected",
             command=self._add_game,
             width=100,
             height=40,
@@ -1284,7 +1383,7 @@ class AddGameDialog(ctk.CTkToplevel):
             
             ctk.CTkLabel(
                 empty,
-                text="Add a custom game using the fields below.",
+                text="Use 'Add Custom Game' to add it manually.",
                 font=ui_font(size=11),
                 text_color=BRAND_COLORS["text_muted"],
                 anchor="w"
@@ -1415,53 +1514,7 @@ class AddGameDialog(ctk.CTkToplevel):
     def _select_suggestion(self, game: Dict[str, Any]):
         """Select a suggestion"""
         self.selected_suggestion = game
-        self.name_entry.delete(0, "end")
-        self.name_entry.insert(0, game.get("name", ""))
-        
-        # Use first save path
-        paths = game.get("save_paths", [])
-        if paths:
-            self.path_entry.delete(0, "end")
-            self.path_entry.insert(0, paths[0])
-        
         self._populate_suggestions(self.search_entry.get().strip())
-
-    def _clear_suggestion_selection(self):
-        if self.selected_suggestion:
-            self.selected_suggestion = None
-            self._populate_suggestions(self.search_entry.get().strip())
-
-    def _use_custom_game(self):
-        """Clear selection and focus custom fields."""
-        self._clear_suggestion_selection()
-        self.search_entry.delete(0, "end")
-        self._populate_suggestions("")
-        self._highlight_custom_fields()
-        self._scroll_to_custom_fields()
-        self.name_entry.focus_set()
-
-    def _scroll_to_custom_fields(self):
-        body = getattr(self, "_body_scroll", None)
-        if body and hasattr(body, "_parent_canvas"):
-            try:
-                body._parent_canvas.yview_moveto(1.0)
-            except Exception:
-                pass
-
-    def _highlight_custom_fields(self):
-        self.name_entry.configure(border_color=BRAND_COLORS["accent"])
-        self.path_entry.configure(border_color=BRAND_COLORS["accent"])
-        
-        def reset():
-            self.name_entry.configure(border_color=BRAND_COLORS["border"])
-            self.path_entry.configure(border_color=BRAND_COLORS["border"])
-        
-        self.after(500, reset)
-
-    def _on_manual_edit(self, event):
-        """Switch to custom mode when editing fields."""
-        if self.selected_suggestion:
-            self._clear_suggestion_selection()
     
     def _on_search(self, event):
         """Handle search input"""
@@ -1469,44 +1522,238 @@ class AddGameDialog(ctk.CTkToplevel):
         if self.selected_suggestion:
             self.selected_suggestion = None
         self._populate_suggestions(query)
-    
-    def _browse_path(self):
-        path = filedialog.askdirectory(title="Select Save Folder")
-        if path:
-            self._clear_suggestion_selection()
-            self.path_entry.delete(0, "end")
-            self.path_entry.insert(0, path)
+
+    def _open_custom_game_dialog(self):
+        dialog = CustomGameDialog(self)
+        self.wait_window(dialog)
+
+        if dialog.result:
+            self.result = dialog.result
+            self._safe_close()
     
     def _add_game(self):
-        name = self.name_entry.get().strip()
-        if not name:
-            search_name = self.search_entry.get().strip()
-            if search_name:
-                name = search_name
-                self.name_entry.delete(0, "end")
-                self.name_entry.insert(0, name)
-        path = self.path_entry.get().strip()
-        
-        if not name:
-            messagebox.showerror("Required", "Please enter a game name.")
+        if not self.selected_suggestion:
+            messagebox.showerror(
+                "Select a game",
+                "Select a game from Suggestions, or click 'Add Custom Game'."
+            )
             return
-        
-        # Create game entry
-        import uuid
+
         selected = self.selected_suggestion or {}
+        import uuid
+
         game_id = selected.get("id") or str(uuid.uuid4())[:8]
+        name = selected.get("name", "Unknown")
         developer = selected.get("developer", "")
-        
-        if not path:
-            path = ""
-        
+        paths = selected.get("save_paths", [])
+        default_save_path = paths[0] if isinstance(paths, list) and paths else ""
+
         self.result = {
             "id": game_id,
             "name": name,
             "developer": developer,
-            "save_path": path
+            "save_path": default_save_path,
         }
-        self.destroy()
+        self._safe_close()
+
+    def _safe_close(self):
+        safe_close_toplevel(self)
+
+
+# ==========================================
+# CUSTOM GAME DIALOG
+# ==========================================
+class CustomGameDialog(ctk.CTkToplevel):
+    """Dedicated dialog for adding a custom game."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+
+        self.title("Add Custom Game")
+        self.geometry("520x420")
+        schedule_app_icon(self)
+        self.transient(parent)
+        self.grab_set()
+        self.configure(fg_color=BRAND_COLORS["bg_dark"])
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self._safe_close)
+
+        self.result = None
+
+        # Center
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - 520) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 420) // 2
+        self.geometry(f"+{x}+{y}")
+
+        self._build_ui()
+
+    def _build_ui(self):
+        content = ctk.CTkFrame(self, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=28, pady=24)
+
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_rowconfigure(1, weight=0)
+        content.grid_columnconfigure(0, weight=1)
+
+        body = ctk.CTkFrame(content, fg_color="transparent")
+        body.grid(row=0, column=0, sticky="nsew")
+
+        ctk.CTkLabel(
+            body,
+            text="Add Custom Game",
+            font=ui_font(size=20, weight="bold"),
+            text_color=BRAND_COLORS["text_primary"],
+            anchor="w",
+        ).pack(fill="x")
+
+        ctk.CTkLabel(
+            body,
+            text="Use this when the game isn’t in suggestions.",
+            font=ui_font(size=12),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w",
+        ).pack(fill="x", pady=(4, 16))
+
+        # Name
+        ctk.CTkLabel(
+            body,
+            text="Game Name *",
+            font=ui_font(size=11, weight="bold"),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w",
+        ).pack(fill="x")
+
+        self.name_entry = ctk.CTkEntry(
+            body,
+            height=38,
+            placeholder_text="e.g., My Indie Game",
+            font=ui_font(size=12),
+            fg_color=BRAND_COLORS["bg_card"],
+            border_color=BRAND_COLORS["border"],
+            border_width=1,
+        )
+        self.name_entry.pack(fill="x", pady=(4, 12))
+
+        # Developer (optional)
+        ctk.CTkLabel(
+            body,
+            text="Developer (optional)",
+            font=ui_font(size=11, weight="bold"),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w",
+        ).pack(fill="x")
+
+        self.developer_entry = ctk.CTkEntry(
+            body,
+            height=38,
+            placeholder_text="e.g., FromSoftware",
+            font=ui_font(size=12),
+            fg_color=BRAND_COLORS["bg_card"],
+            border_color=BRAND_COLORS["border"],
+            border_width=1,
+        )
+        self.developer_entry.pack(fill="x", pady=(4, 12))
+
+        # Save path
+        ctk.CTkLabel(
+            body,
+            text="Save Folder Path (optional)",
+            font=ui_font(size=11, weight="bold"),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w",
+        ).pack(fill="x")
+
+        path_row = ctk.CTkFrame(body, fg_color="transparent")
+        path_row.pack(fill="x", pady=(4, 0))
+
+        self.path_entry = ctk.CTkEntry(
+            path_row,
+            height=38,
+            placeholder_text=r"e.g., %APPDATA%\\GameName\\Saves",
+            font=ui_font(size=12),
+            fg_color=BRAND_COLORS["bg_card"],
+            border_color=BRAND_COLORS["border"],
+            border_width=1,
+        )
+        self.path_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        ctk.CTkButton(
+            path_row,
+            text="Browse",
+            command=self._browse_path,
+            width=84,
+            height=38,
+            font=ui_font(size=11),
+            fg_color=BRAND_COLORS["bg_hover"],
+            hover_color=BRAND_COLORS["border_hover"],
+            corner_radius=6,
+        ).pack(side="right")
+
+        ctk.CTkLabel(
+            body,
+            text="Tip: You can change the save folder later from the game view.",
+            font=ui_font(size=11),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w",
+        ).pack(fill="x", pady=(10, 0))
+
+        # Buttons
+        btn_frame = ctk.CTkFrame(content, fg_color="transparent")
+        btn_frame.grid(row=1, column=0, sticky="ew", pady=(18, 0))
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Cancel",
+            command=self._safe_close,
+            width=110,
+            height=40,
+            font=ui_font(size=12),
+            fg_color=BRAND_COLORS["bg_hover"],
+            hover_color=BRAND_COLORS["border_hover"],
+            corner_radius=6,
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Add Custom Game",
+            command=self._add_custom_game,
+            width=160,
+            height=40,
+            font=ui_font(size=12, weight="bold"),
+            fg_color=BRAND_COLORS["accent"],
+            hover_color=BRAND_COLORS["accent_hover"],
+            corner_radius=6,
+        ).pack(side="right")
+
+        self.name_entry.focus_set()
+
+    def _browse_path(self):
+        path = filedialog.askdirectory(title="Select Save Folder")
+        if path:
+            self.path_entry.delete(0, "end")
+            self.path_entry.insert(0, path)
+
+    def _add_custom_game(self):
+        name = self.name_entry.get().strip()
+        if not name:
+            messagebox.showerror("Required", "Please enter a game name.")
+            return
+
+        developer = self.developer_entry.get().strip()
+        save_path = self.path_entry.get().strip()
+
+        import uuid
+        self.result = {
+            "id": str(uuid.uuid4())[:8],
+            "name": name,
+            "developer": developer,
+            "save_path": save_path,
+        }
+        self._safe_close()
+
+    def _safe_close(self):
+        safe_close_toplevel(self)
 
 
 # ==========================================
@@ -1520,10 +1767,12 @@ class SettingsDialog(ctk.CTkToplevel):
         
         self.title("Settings")
         self.geometry("480x320")
+        schedule_app_icon(self)
         self.transient(parent)
         self.grab_set()
         self.configure(fg_color=BRAND_COLORS["bg_dark"])
         self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self._safe_close)
         
         self.config = config.copy()
         self.result = None
@@ -1639,7 +1888,7 @@ class SettingsDialog(ctk.CTkToplevel):
         ctk.CTkButton(
             btn_frame,
             text="Cancel",
-            command=self.destroy,
+            command=self._safe_close,
             width=100,
             height=40,
             font=ui_font(size=12),
@@ -1677,4 +1926,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self.config["backup_directory"] = backup_dir
         self.config["max_backups"] = self.max_var.get()
         self.result = self.config
-        self.destroy()
+        self._safe_close()
+
+    def _safe_close(self):
+        safe_close_toplevel(self)
