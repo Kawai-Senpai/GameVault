@@ -2,7 +2,6 @@
   <img src="assets/Poster.png" alt="GameVault" width="100%"/>
 </p>
 
-<h1 align="center">GameVault</h1>
 <p align="center">
   <strong>A modern, elegant game save backup manager for Windows</strong>
 </p>
