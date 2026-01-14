@@ -1083,8 +1083,18 @@ class GameVaultWindow(ctk.CTk):
 
         try:
             app_dir = Path(__file__).resolve().parents[1]
-            exe_candidate = app_dir / "GameVault.exe"
-            exe_path = str(exe_candidate) if exe_candidate.exists() else None
+            exe_path = None
+            
+            # Check if running as exe (PyInstaller)
+            if getattr(sys, 'frozen', False):
+                # Running as compiled exe
+                exe_path = sys.executable
+            else:
+                # Running from source - check for dist/GameVault.exe
+                for exe_loc in [app_dir / "GameVault.exe", app_dir / "dist" / "GameVault.exe"]:
+                    if exe_loc.exists():
+                        exe_path = str(exe_loc)
+                        break
 
             generator = BatGenerator(app_dir=str(app_dir), exe_path=exe_path)
             bat_path = generator.generate_bat(game_id=game_id, game_name=game_name, output_dir=output_dir)
