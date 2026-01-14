@@ -20,10 +20,10 @@ pip install pyinstaller
 echo.
 echo Building executable...
 
-:: Build with PyInstaller
+:: Build with PyInstaller (uses PNG icon, converts to ICO automatically)
 pyinstaller --onefile --windowed ^
     --name "GameVault" ^
-    --icon "assets/icon.ico" ^
+    --icon "assets/GameVault.png" ^
     --add-data "data;data" ^
     --add-data "assets;assets" ^
     main.py
