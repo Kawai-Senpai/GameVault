@@ -2,12 +2,26 @@
   <img src="assets/Poster.png" alt="GameVault" width="100%"/>
 </p>
 
+<h1 align="center">GameVault</h1>
 <p align="center">
   <strong>A modern, elegant game save backup manager for Windows</strong>
 </p>
 <p align="center">
+  <a href="https://github.com/Kawai-Senpai/GameVault/releases"><img src="https://img.shields.io/github/v/release/Kawai-Senpai/GameVault?style=flat-square&color=ef4444" alt="Release"></a>
+  <a href="https://github.com/Kawai-Senpai/GameVault/releases"><img src="https://img.shields.io/github/downloads/Kawai-Senpai/GameVault/total?style=flat-square&color=22c55e" alt="Downloads"></a>
+  <a href="https://github.com/Kawai-Senpai/GameVault/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Kawai-Senpai/GameVault?style=flat-square" alt="License"></a>
+</p>
+<p align="center">
   <a href="https://ranitbhowmick.com">Created by Ranit Bhowmick</a>
 </p>
+
+---
+
+## 📥 Download
+
+**[⬇️ Download Latest Release (GameVault.exe)](https://github.com/Kawai-Senpai/GameVault/releases/latest)**
+
+> No installation required! Just download and run the `.exe` file.
 
 ---
 
@@ -21,33 +35,22 @@
 - 📝 **Quick Backup Shortcuts** – Generate `.bat` files for one-click backups
 - 🔄 **Restore Anytime** – Restore any backup with a single click
 - 🎨 **Modern Dark UI** – Clean, intuitive interface with a sleek dark theme
+- 🔔 **Update Notifications** – Automatically checks for new versions
 - ⚡ **CLI Support** – Backup games from the command line
 
 ---
 
-## 🎮 Supported Games (Auto-detect)
+## 🎮 Supported Games (50+)
 
-- Elden Ring / Elden Ring Nightreign
-- Dark Souls III
-- Sekiro: Shadows Die Twice
-- Minecraft (Java & Bedrock)
-- Stardew Valley
-- Hollow Knight
-- Cyberpunk 2077
-- The Witcher 3
-- GTA V
-- Skyrim (Original & Special Edition)
-- Baldur's Gate 3
-- Hades
-- Terraria
-- Valheim
-- Monster Hunter: World
-- Resident Evil 4 Remake
-- **...and many more!**
+- **FromSoftware:** Elden Ring, Nightreign, Dark Souls (1-3), Sekiro, Lies of P
+- **Tomb Raider:** Full series (I-VI Remastered, Survivor trilogy, classics)
+- **PlayStation Ports:** Uncharted, The Last of Us Part I & II
+- **RPGs:** Witcher 3, Cyberpunk 2077, Baldur's Gate 3, Skyrim
+- **Indies:** Hollow Knight, Celeste, Cuphead, Dead Cells, Hades
+- **Survival:** Minecraft, Terraria, Valheim, Subnautica
+- **And many more...**
 
-> Don't see your game? No problem! You can add any game manually with a custom save path.
-
----
+> Don't see your game? Add any game manually with a custom save path!
 
 ## 📥 Installation
 

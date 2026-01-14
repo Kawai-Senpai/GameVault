@@ -23,6 +23,7 @@ from core.config_manager import ConfigManager
 from core.game_db import GameDatabase
 from core.backup_engine import BackupEngine
 from core.bat_generator import BatGenerator
+from core.version import __version__, check_for_update, GITHUB_REPO
 
 # ==========================================
 # BRAND COLORS (from DESIGN_SYSTEM.md)
@@ -287,17 +288,42 @@ class GameVaultWindow(ctk.CTk):
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
         
-        # Sidebar header
+        # Sidebar header with title and version
         header = ctk.CTkFrame(self.sidebar, fg_color="transparent", height=70)
         header.pack(fill="x")
         header.pack_propagate(False)
         
-        ctk.CTkLabel(
-            header,
+        header_inner = ctk.CTkFrame(header, fg_color="transparent")
+        header_inner.pack(fill="x", padx=20, pady=20)
+        
+        title_label = ctk.CTkLabel(
+            header_inner,
             text="GameVault",
             font=ui_font(size=20, weight="bold"),
             text_color=BRAND_COLORS["text_primary"]
-        ).pack(padx=20, pady=20, anchor="w")
+        )
+        title_label.pack(side="left", anchor="w")
+        
+        # Version and update indicator in header
+        self.version_label = ctk.CTkLabel(
+            header_inner,
+            text=f"v{__version__}",
+            font=ui_font(size=11),
+            text_color=BRAND_COLORS["text_muted"]
+        )
+        self.version_label.pack(side="left", padx=(8, 0))
+        
+        self.update_indicator = ctk.CTkLabel(
+            header_inner,
+            text="",
+            font=ui_font(size=10),
+            text_color=BRAND_COLORS["success"],
+            cursor="hand2"
+        )
+        self.update_indicator.pack(side="left", padx=(4, 0))
+        
+        # Check for updates in background
+        self._check_update_async()
         
         # Add game button
         add_btn = ctk.CTkButton(
@@ -382,6 +408,24 @@ class GameVaultWindow(ctk.CTk):
         # Load games
         self._refresh_games()
         self._build_placeholder_content()
+    
+    def _check_update_async(self):
+        """Check for updates in background thread."""
+        def worker():
+            result = check_for_update()
+            if result["has_update"] and result["latest_version"]:
+                self.after(0, lambda: self._show_update_available(result))
+        
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+    
+    def _show_update_available(self, update_info: Dict[str, Any]):
+        """Show update available indicator."""
+        latest = update_info.get("latest_version", "")
+        release_url = update_info.get("release_url") or f"https://github.com/{GITHUB_REPO}/releases"
+        
+        self.update_indicator.configure(text=f"• Update {latest}")
+        self.update_indicator.bind("<Button-1>", lambda e: webbrowser.open(release_url))
     
     def _refresh_games(self):
         """Refresh the games list"""
