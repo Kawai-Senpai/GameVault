@@ -1,0 +1,192 @@
+{
+  "games": [
+    {
+      "id": "elden_ring",
+      "name": "Elden Ring",
+      "developer": "FromSoftware",
+      "icon": "elden_ring.png",
+      "save_paths": [
+        "%APPDATA%\\EldenRing"
+      ],
+      "extensions": [],
+      "notes": "Backs up entire save folder"
+    },
+    {
+      "id": "nightreign",
+      "name": "Elden Ring: Nightreign",
+      "developer": "FromSoftware",
+      "icon": "nightreign.png",
+      "save_paths": [
+        "%APPDATA%\\Nightreign"
+      ],
+      "extensions": [],
+      "notes": "Backs up entire save folder"
+    },
+    {
+      "id": "dark_souls_3",
+      "name": "Dark Souls III",
+      "developer": "FromSoftware",
+      "icon": "dark_souls_3.png",
+      "save_paths": [
+        "%APPDATA%\\DarkSoulsIII"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "sekiro",
+      "name": "Sekiro: Shadows Die Twice",
+      "developer": "FromSoftware",
+      "icon": "sekiro.png",
+      "save_paths": [
+        "%APPDATA%\\Sekiro"
+      ],
+      "extensions": [".sl2"],
+      "notes": ""
+    },
+    {
+      "id": "minecraft",
+      "name": "Minecraft",
+      "developer": "Mojang",
+      "icon": "minecraft.png",
+      "save_paths": [
+        "%APPDATA%\\.minecraft\\saves"
+      ],
+      "extensions": [],
+      "notes": "Backs up entire saves folder"
+    },
+    {
+      "id": "stardew_valley",
+      "name": "Stardew Valley",
+      "developer": "ConcernedApe",
+      "icon": "stardew_valley.png",
+      "save_paths": [
+        "%APPDATA%\\StardewValley\\Saves"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "hollow_knight",
+      "name": "Hollow Knight",
+      "developer": "Team Cherry",
+      "icon": "hollow_knight.png",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Team Cherry\\Hollow Knight"
+      ],
+      "extensions": [".dat"],
+      "notes": ""
+    },
+    {
+      "id": "cyberpunk_2077",
+      "name": "Cyberpunk 2077",
+      "developer": "CD Projekt Red",
+      "icon": "cyberpunk_2077.png",
+      "save_paths": [
+        "%USERPROFILE%\\Saved Games\\CD Projekt Red\\Cyberpunk 2077"
+      ],
+      "extensions": [".dat"],
+      "notes": ""
+    },
+    {
+      "id": "witcher_3",
+      "name": "The Witcher 3",
+      "developer": "CD Projekt Red",
+      "icon": "witcher_3.png",
+      "save_paths": [
+        "%USERPROFILE%\\Documents\\The Witcher 3\\gamesaves"
+      ],
+      "extensions": [".sav"],
+      "notes": ""
+    },
+    {
+      "id": "gta_v",
+      "name": "Grand Theft Auto V",
+      "developer": "Rockstar Games",
+      "icon": "gta_v.png",
+      "save_paths": [
+        "%USERPROFILE%\\Documents\\Rockstar Games\\GTA V\\Profiles"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "skyrim",
+      "name": "The Elder Scrolls V: Skyrim",
+      "developer": "Bethesda",
+      "icon": "skyrim.png",
+      "save_paths": [
+        "%USERPROFILE%\\Documents\\My Games\\Skyrim\\Saves",
+        "%USERPROFILE%\\Documents\\My Games\\Skyrim Special Edition\\Saves"
+      ],
+      "extensions": [".ess", ".skse"],
+      "notes": "Supports both original and Special Edition"
+    },
+    {
+      "id": "baldurs_gate_3",
+      "name": "Baldur's Gate 3",
+      "developer": "Larian Studios",
+      "icon": "baldurs_gate_3.png",
+      "save_paths": [
+        "%LOCALAPPDATA%\\Larian Studios\\Baldur's Gate 3\\PlayerProfiles"
+      ],
+      "extensions": [".lsv"],
+      "notes": ""
+    },
+    {
+      "id": "hades",
+      "name": "Hades",
+      "developer": "Supergiant Games",
+      "icon": "hades.png",
+      "save_paths": [
+        "%USERPROFILE%\\Documents\\Saved Games\\Hades"
+      ],
+      "extensions": [".sav"],
+      "notes": ""
+    },
+    {
+      "id": "terraria",
+      "name": "Terraria",
+      "developer": "Re-Logic",
+      "icon": "terraria.png",
+      "save_paths": [
+        "%USERPROFILE%\\Documents\\My Games\\Terraria"
+      ],
+      "extensions": [".wld", ".plr"],
+      "notes": "Includes worlds and player files"
+    },
+    {
+      "id": "valheim",
+      "name": "Valheim",
+      "developer": "Iron Gate",
+      "icon": "valheim.png",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\IronGate\\Valheim"
+      ],
+      "extensions": [".fwl", ".db"],
+      "notes": ""
+    },
+    {
+      "id": "monster_hunter_world",
+      "name": "Monster Hunter: World",
+      "developer": "Capcom",
+      "icon": "monster_hunter_world.png",
+      "save_paths": [
+        "%LOCALAPPDATA%\\CAPCOM\\MONSTER HUNTER WORLD\\steam_id"
+      ],
+      "extensions": [],
+      "notes": "Save location varies by Steam ID"
+    },
+    {
+      "id": "resident_evil_4",
+      "name": "Resident Evil 4 Remake",
+      "developer": "Capcom",
+      "icon": "resident_evil_4.png",
+      "save_paths": [
+        "%LOCALAPPDATA%\\CAPCOM\\RESIDENT EVIL 4 BIOHAZARD RE4"
+      ],
+      "extensions": [],
+      "notes": ""
+    }
+  ]
+}
