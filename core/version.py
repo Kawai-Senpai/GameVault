@@ -2,8 +2,8 @@
 GameVault Version Info
 """
 
-__version__ = "1.0.0"
-__version_info__ = (1, 0, 0)
+__version__ = "1.1.0"
+__version_info__ = (1, 1, 0)
 
 GITHUB_REPO = "Kawai-Senpai/GameVault"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

@@ -10,6 +10,7 @@ References:
 import os
 import sys
 import platform
+import subprocess
 import webbrowser
 import threading
 from datetime import datetime
@@ -202,6 +203,66 @@ def truncate_text(value: str, max_chars: int) -> str:
     if max_chars <= 3:
         return text[:max_chars]
     return text[: max_chars - 3].rstrip() + "..."
+
+
+def attach_tooltip(widget: Any, text: str) -> None:
+    """Attach a lightweight tooltip to a widget."""
+    if not text:
+        return
+
+    state: Dict[str, Any] = {"window": None}
+
+    def _destroy() -> None:
+        tooltip = state.get("window")
+        if tooltip is None:
+            return
+        try:
+            if tooltip.winfo_exists():
+                tooltip.destroy()
+        except Exception:
+            pass
+        state["window"] = None
+
+    def _show(_event=None) -> None:
+        if state.get("window") is not None:
+            return
+        try:
+            tooltip = ctk.CTkToplevel(widget)
+            tooltip.overrideredirect(True)
+            try:
+                tooltip.attributes("-topmost", True)
+            except Exception:
+                pass
+            tooltip.configure(fg_color=BRAND_COLORS["bg_card"])
+
+            frame = ctk.CTkFrame(
+                tooltip,
+                fg_color=BRAND_COLORS["bg_card"],
+                border_width=1,
+                border_color=BRAND_COLORS["border"],
+                corner_radius=6,
+            )
+            frame.pack(fill="both", expand=True)
+
+            label = ctk.CTkLabel(
+                frame,
+                text=text,
+                font=ui_font(size=10),
+                text_color=BRAND_COLORS["text_secondary"],
+            )
+            label.pack(padx=8, pady=4)
+
+            tooltip.update_idletasks()
+            x = widget.winfo_rootx() + 8
+            y = widget.winfo_rooty() + widget.winfo_height() + 8
+            tooltip.geometry(f"+{x}+{y}")
+            state["window"] = tooltip
+        except Exception:
+            _destroy()
+
+    widget.bind("<Enter>", _show, add="+")
+    widget.bind("<Leave>", lambda _e: _destroy(), add="+")
+    widget.bind("<ButtonPress>", lambda _e: _destroy(), add="+")
 
 # ==========================================
 # MAIN WINDOW
@@ -685,8 +746,36 @@ class GameVaultWindow(ctk.CTk):
         # Actions row
         actions = ctk.CTkFrame(self.content_area, fg_color="transparent")
         actions.pack(fill="x", pady=(0, 20))
+
+        play_btn = ctk.CTkButton(
+            actions,
+            text="Play",
+            command=lambda: self._launch_game(game),
+            height=40,
+            font=ui_font(size=13, weight="bold"),
+            fg_color=BRAND_COLORS["success"],
+            hover_color=BRAND_COLORS["success"],
+            text_color=BRAND_COLORS["bg_dark"],
+            corner_radius=6
+        )
+        play_btn.pack(side="left", padx=(0, 12))
+        attach_tooltip(play_btn, "Launch the game (choose the .exe if needed).")
+
+        backup_play_btn = ctk.CTkButton(
+            actions,
+            text="Backup & Play",
+            command=lambda: self._backup_and_play(game),
+            height=40,
+            font=ui_font(size=13, weight="bold"),
+            fg_color=BRAND_COLORS["accent_muted"],
+            hover_color=BRAND_COLORS["accent"],
+            text_color=BRAND_COLORS["text_primary"],
+            corner_radius=6
+        )
+        backup_play_btn.pack(side="left", padx=(0, 12))
+        attach_tooltip(backup_play_btn, "Create a backup first, then launch the game.")
         
-        ctk.CTkButton(
+        backup_btn = ctk.CTkButton(
             actions,
             text="Backup Now",
             command=lambda: self._backup_game(game),
@@ -695,9 +784,11 @@ class GameVaultWindow(ctk.CTk):
             fg_color=BRAND_COLORS["accent"],
             hover_color=BRAND_COLORS["accent_hover"],
             corner_radius=6
-        ).pack(side="left", padx=(0, 12))
+        )
+        backup_btn.pack(side="left", padx=(0, 12))
+        attach_tooltip(backup_btn, "Create a backup of the save folder now.")
         
-        ctk.CTkButton(
+        open_save_btn = ctk.CTkButton(
             actions,
             text="Open Save Folder",
             command=lambda: self._open_save_folder(game),
@@ -706,9 +797,11 @@ class GameVaultWindow(ctk.CTk):
             fg_color=BRAND_COLORS["bg_hover"],
             hover_color=BRAND_COLORS["border_hover"],
             corner_radius=6
-        ).pack(side="left")
+        )
+        open_save_btn.pack(side="left")
+        attach_tooltip(open_save_btn, "Open the save folder for this game.")
 
-        ctk.CTkButton(
+        script_btn = ctk.CTkButton(
             actions,
             text="Create Backup Script",
             command=lambda: self._generate_quick_backup_bat(game),
@@ -717,7 +810,9 @@ class GameVaultWindow(ctk.CTk):
             fg_color=BRAND_COLORS["bg_hover"],
             hover_color=BRAND_COLORS["border_hover"],
             corner_radius=6
-        ).pack(side="left", padx=(12, 0))
+        )
+        script_btn.pack(side="left", padx=(12, 0))
+        attach_tooltip(script_btn, "Generate a .bat file to run backups quickly.")
         
         # Save path info
         save_path = game.get("save_path", "")
@@ -1082,6 +1177,73 @@ class GameVaultWindow(ctk.CTk):
         self.config["user_games"] = self.user_games
         self.config_manager.save_config(self.config)
         self._build_game_view(game)
+
+    def _set_game_exe_path(self, game: Dict[str, Any]) -> Optional[str]:
+        """Set or update the game executable path."""
+        path = filedialog.askopenfilename(
+            title="Select Game Executable",
+            filetypes=[("Executable", "*.exe"), ("All Files", "*.*")]
+        )
+        if not path:
+            return None
+
+        game["exe_path"] = path
+
+        for existing in self.user_games:
+            if existing.get("id") == game.get("id"):
+                existing["exe_path"] = path
+                break
+
+        if self.selected_game and self.selected_game.get("id") == game.get("id"):
+            self.selected_game["exe_path"] = path
+
+        self.config["user_games"] = self.user_games
+        self.config_manager.save_config(self.config)
+        self._build_game_view(game)
+        return path
+
+    def _resolve_game_exe_path(self, game: Dict[str, Any]) -> Optional[str]:
+        raw_path = game.get("exe_path", "")
+        expanded_path = os.path.expandvars(raw_path) if raw_path else ""
+        if expanded_path and Path(expanded_path).exists():
+            return expanded_path
+        return None
+
+    def _ensure_game_exe_path(self, game: Dict[str, Any]) -> Optional[str]:
+        resolved = self._resolve_game_exe_path(game)
+        if resolved:
+            return resolved
+        return self._set_game_exe_path(game)
+
+    def _launch_game_path(self, exe_path: str) -> None:
+        try:
+            system = platform.system().lower()
+            exe_dir = str(Path(exe_path).parent)
+            if system == "windows":
+                try:
+                    subprocess.Popen([exe_path], cwd=exe_dir)
+                    return
+                except Exception:
+                    os.startfile(exe_path)
+                    return
+            if system == "darwin":
+                subprocess.Popen(["open", exe_path], cwd=exe_dir)
+            else:
+                subprocess.Popen(["xdg-open", exe_path], cwd=exe_dir)
+        except Exception as exc:
+            messagebox.showerror("Launch Failed", f"Could not launch the game:\n{exc}")
+
+    def _launch_game(self, game: Dict[str, Any]) -> None:
+        exe_path = self._ensure_game_exe_path(game)
+        if not exe_path:
+            return
+        self._launch_game_path(exe_path)
+
+    def _backup_and_play(self, game: Dict[str, Any]) -> None:
+        exe_path = self._ensure_game_exe_path(game)
+        if not exe_path:
+            return
+        self._backup_game(game, post_backup_action=lambda: self._launch_game_path(exe_path))
     
     def _remove_game(self, game: Dict[str, Any]):
         """Remove a game from the list"""
@@ -1150,7 +1312,7 @@ class GameVaultWindow(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Failed", f"Could not create .bat file:\n{e}")
     
-    def _backup_game(self, game: Dict[str, Any]):
+    def _backup_game(self, game: Dict[str, Any], post_backup_action: Optional[Any] = None):
         """Backup a game"""
         if not self.engine:
             messagebox.showerror("Error", "Please set a backup directory in Settings first.")
@@ -1186,9 +1348,16 @@ class GameVaultWindow(ctk.CTk):
                 return
             collection_id = created_id
 
-        self._start_backup(game, expanded_path, display_name, collection_id)
+        self._start_backup(game, expanded_path, display_name, collection_id, post_backup_action=post_backup_action)
 
-    def _start_backup(self, game: Dict[str, Any], expanded_path: str, display_name: str, collection_id: str):
+    def _start_backup(
+        self,
+        game: Dict[str, Any],
+        expanded_path: str,
+        display_name: str,
+        collection_id: str,
+        post_backup_action: Optional[Any] = None,
+    ):
         """Run backup in a thread with progress UI."""
         if not self.engine:
             return
@@ -1248,12 +1417,12 @@ class GameVaultWindow(ctk.CTk):
                 display_name=display_name,
                 collection_id=collection_id
             )
-            self.after(0, lambda: self._on_backup_complete(result, game))
+            self.after(0, lambda: self._on_backup_complete(result, game, post_backup_action))
         
         thread = threading.Thread(target=do_backup, daemon=True)
         thread.start()
     
-    def _on_backup_complete(self, result: Dict[str, Any], game: Dict[str, Any]):
+    def _on_backup_complete(self, result: Dict[str, Any], game: Dict[str, Any], post_backup_action: Optional[Any] = None):
         """Handle backup completion"""
         if hasattr(self, "_progress_window"):
             self._spinner_running = False
@@ -1278,6 +1447,8 @@ class GameVaultWindow(ctk.CTk):
                     f"Successfully backed up {game.get('name')}!\n\nSize: {size_str}"
                 )
             self._build_game_view(game)
+            if callable(post_backup_action):
+                post_backup_action()
         else:
             messagebox.showerror("Backup Failed", result.get("error", "Unknown error"))
 
