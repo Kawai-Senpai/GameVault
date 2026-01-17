@@ -3,5 +3,6 @@
   "max_backups": 10,
   "user_games": [],
   "theme": "dark",
-  "auto_detect_games": true
+  "auto_detect_games": true,
+  "setup_complete": false
 }

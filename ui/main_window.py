@@ -1446,30 +1446,6 @@ class SetupWizard(ctk.CTkToplevel):
             font=ui_font(size=13),
             text_color=BRAND_COLORS["text_muted"]
         ).pack(pady=(0, 24))
-
-        ctk.CTkLabel(
-            body,
-            text="You can name backups and organize them into collections for different playthroughs.",
-            font=ui_font(size=11),
-            text_color=BRAND_COLORS["text_muted"],
-            wraplength=420,
-            anchor="w",
-            justify="left"
-        ).pack(fill="x", pady=(0, 16))
-
-        ctk.CTkLabel(
-            body,
-            text=(
-                "What you’ll get:\n"
-                "• One-click backups and restore\n"
-                "• Change save folder paths anytime\n"
-                "• Generate quick-backup .bat shortcuts"
-            ),
-            font=ui_font(size=11),
-            text_color=BRAND_COLORS["text_muted"],
-            justify="left",
-            anchor="w",
-        ).pack(fill="x", pady=(0, 18))
         
         # Backup directory
         dir_frame = ctk.CTkFrame(body, fg_color="transparent")
