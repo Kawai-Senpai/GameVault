@@ -65,7 +65,7 @@ ACTION_BUTTON_GAP = 8
 ACTION_BUTTON_FONT_SIZE = 11
 GAME_SETTINGS_PATH_MAX_CHARS = 64
 
-ICON_PLAY = "►"
+ICON_PLAY = "▸"
 ICON_BACKUP_PLAY = "⟳"
 ICON_BACKUP = "⬇"
 ICON_OPEN_FOLDER = "📂"
@@ -810,7 +810,7 @@ class GameVaultWindow(ctk.CTk):
                 hover_color=BRAND_COLORS["success"],
                 text_color=BRAND_COLORS["bg_dark"],
                 tooltip="Launch the game (choose the .exe if needed).",
-                font_size=13
+                font_size=12
             )
         )
 
