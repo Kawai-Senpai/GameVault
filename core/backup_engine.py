@@ -143,6 +143,8 @@ class BackupEngine:
         force: bool = False,
         display_name: Optional[str] = None,
         collection_id: str = "default",
+        retention_enabled: bool = False,
+        retention_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Create a compressed backup of a game's save files with deduplication.
@@ -154,6 +156,8 @@ class BackupEngine:
             force: Force backup even if content is unchanged
             display_name: Optional display name for the backup
             collection_id: Optional collection identifier
+            retention_enabled: Whether to enforce retention for this collection
+            retention_limit: Max backups to keep for the collection (if enabled)
             
         Returns:
             Dict with backup status and info
@@ -225,7 +229,12 @@ class BackupEngine:
             compressed_size = zip_path.stat().st_size
             
             # Apply rolling backup limit
-            self._apply_rolling_limit(game_backup_dir)
+            self._apply_rolling_limit(
+                game_backup_dir,
+                collection_id=collection_id,
+                retention_enabled=retention_enabled,
+                retention_limit=retention_limit,
+            )
             
             return {
                 "success": True,
@@ -252,21 +261,63 @@ class BackupEngine:
                 "skipped": False
             }
     
-    def _apply_rolling_limit(self, game_backup_dir: Path):
-        """Delete oldest backups if we exceed the max limit"""
-        
+    def _get_backup_collection_id(self, backup_path: Path) -> str:
+        """Read the collection id from a backup's metadata."""
+        metadata = None
+        if backup_path.suffix == ".zip":
+            metadata = self._read_metadata_from_zip(backup_path)
+        elif backup_path.is_dir():
+            metadata_path = backup_path / "_backup_info.json"
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, "r", encoding="utf-8") as f:
+                        metadata = json.load(f)
+                except Exception:
+                    metadata = None
+        return (metadata or {}).get("collection_id") or "default"
+
+    def _apply_rolling_limit(
+        self,
+        game_backup_dir: Path,
+        *,
+        collection_id: str,
+        retention_enabled: bool = False,
+        retention_limit: Optional[int] = None,
+    ):
+        """Delete oldest backups if we exceed the collection-specific limit."""
+
+        if not retention_enabled:
+            return
+
+        if retention_limit is None:
+            retention_limit = self.max_backups
+
+        try:
+            retention_limit = int(retention_limit)
+        except (TypeError, ValueError):
+            return
+
+        if retention_limit <= 0:
+            return
+
         # Get all backup files/folders
         backups = [
-            item for item in game_backup_dir.iterdir() 
-            if (item.is_dir() and not item.name.startswith(".")) or item.suffix == '.zip'
+            item for item in game_backup_dir.iterdir()
+            if (item.is_dir() and not item.name.startswith(".")) or item.suffix == ".zip"
         ]
-        
+
+        target_collection = collection_id or "default"
+        collection_backups = [
+            item for item in backups
+            if self._get_backup_collection_id(item) == target_collection
+        ]
+
         # Sort by modification time (oldest first)
-        backups.sort(key=lambda x: x.stat().st_mtime)
-        
+        collection_backups.sort(key=lambda x: x.stat().st_mtime)
+
         # Delete oldest backups if we exceed limit
-        while len(backups) > self.max_backups:
-            oldest = backups.pop(0)
+        while len(collection_backups) > retention_limit:
+            oldest = collection_backups.pop(0)
             try:
                 if oldest.is_dir():
                     shutil.rmtree(oldest)

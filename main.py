@@ -26,8 +26,30 @@ def load_config():
         "backup_directory": "",
         "max_backups": 10,
         "user_games": [],
+        "backup_collections": {},
         "theme": "dark"
     }
+
+
+def get_collection_retention(config, game_id: str, collection_id: str = "default"):
+    default_limit = config.get("max_backups", 10)
+    try:
+        default_limit = int(default_limit)
+    except (TypeError, ValueError):
+        default_limit = 10
+
+    collections = config.get("backup_collections", {}).get(game_id, [])
+    for collection in collections:
+        if collection.get("id") == collection_id:
+            enabled = bool(collection.get("limit_enabled", False))
+            limit_value = collection.get("max_backups", default_limit)
+            try:
+                limit_value = int(limit_value)
+            except (TypeError, ValueError):
+                limit_value = default_limit
+            return enabled, limit_value
+
+    return False, default_limit
 
 
 def save_config(config):
@@ -77,7 +99,15 @@ def cli_backup(game_id: str):
     print(f"To: {config['backup_directory']}")
     print()
     
-    result = engine.backup_game(game_id, game.get("name"), save_path)
+    retention_enabled, retention_limit = get_collection_retention(config, game_id)
+    result = engine.backup_game(
+        game_id,
+        game.get("name"),
+        save_path,
+        collection_id="default",
+        retention_enabled=retention_enabled,
+        retention_limit=retention_limit if retention_enabled else None,
+    )
     
     if result["success"]:
         print(f"SUCCESS! Backup created: {result['backup_name']}")

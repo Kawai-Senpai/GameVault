@@ -57,6 +57,21 @@ BRAND_COLORS = {
 }
 
 FONT_FAMILY = "Montserrat"
+ICON_FONT_FAMILY = "Segoe UI Symbol"
+
+ICON_FONT_SIZE = 14
+ACTION_BUTTON_HEIGHT = 36
+ACTION_BUTTON_GAP = 8
+ACTION_BUTTON_FONT_SIZE = 11
+GAME_SETTINGS_PATH_MAX_CHARS = 64
+
+ICON_PLAY = "►"
+ICON_BACKUP_PLAY = "⟳"
+ICON_BACKUP = "⬇"
+ICON_OPEN_FOLDER = "📂"
+ICON_SCRIPT = "⧉"
+ICON_SETTINGS = "⚙"
+ICON_REMOVE = "✕"
 
 APP_ICON_PNG_REL = "assets/GameVault.png"
 APP_ICON_ICO_CACHE_REL = "data/.cache/GameVault.ico"
@@ -70,6 +85,7 @@ SUGGESTION_DEVELOPER_MAX_CHARS = 26
 BACKUP_DISPLAY_NAME_MAX_CHARS = 38
 COLLECTION_NAME_MAX_CHARS = 24
 PROGRESS_GAME_NAME_MAX_CHARS = 26
+DEFAULT_COLLECTION_LIMIT = 10
 
 
 def resource_path(relative_path: str) -> Path:
@@ -194,6 +210,12 @@ def ui_font(*args, **kwargs):
     return ctk.CTkFont(*args, **kwargs)
 
 
+def icon_font(*args, **kwargs):
+    """Return a CTkFont for icon glyphs (fallbacks to system symbol font)."""
+    kwargs.setdefault("family", ICON_FONT_FAMILY)
+    return ctk.CTkFont(*args, **kwargs)
+
+
 def truncate_text(value: str, max_chars: int) -> str:
     text = (value or "").strip()
     if max_chars <= 0:
@@ -297,7 +319,10 @@ class GameVaultWindow(ctk.CTk):
         
         # Initialize engine if backup directory set
         if self.config.get("backup_directory"):
-            self.engine = BackupEngine(self.config["backup_directory"])
+            self.engine = BackupEngine(
+                self.config["backup_directory"],
+                max_backups=self.config.get("max_backups", DEFAULT_COLLECTION_LIMIT),
+            )
         
         # Check if first time
         if not self.config.get("setup_complete"):
@@ -324,7 +349,10 @@ class GameVaultWindow(ctk.CTk):
             
             # Initialize engine
             if self.config.get("backup_directory"):
-                self.engine = BackupEngine(self.config["backup_directory"])
+                self.engine = BackupEngine(
+                    self.config["backup_directory"],
+                    max_backups=self.config.get("max_backups", DEFAULT_COLLECTION_LIMIT),
+                )
             
             self._build_ui()
         else:
@@ -416,10 +444,10 @@ class GameVaultWindow(ctk.CTk):
         # Settings button
         settings_btn = ctk.CTkButton(
             bottom,
-            text="Settings",
+            text=f"{ICON_SETTINGS}  Settings",
             command=self._show_settings,
             height=32,
-            font=ui_font(size=12),
+            font=ui_font(size=11, weight="bold"),
             fg_color="transparent",
             hover_color=BRAND_COLORS["bg_hover"],
             text_color=BRAND_COLORS["text_secondary"],
@@ -720,19 +748,36 @@ class GameVaultWindow(ctk.CTk):
             anchor="w"
         ).grid(row=0, column=0, sticky="w")
         
-        # Delete game button (small)
+        settings_btn = ctk.CTkButton(
+            title_row,
+            text=ICON_SETTINGS,
+            command=lambda g=game: self._show_game_settings(g),
+            width=28,
+            height=28,
+            font=icon_font(size=ICON_FONT_SIZE, weight="bold"),
+            fg_color=BRAND_COLORS["bg_hover"],
+            hover_color=BRAND_COLORS["border_hover"],
+            text_color=BRAND_COLORS["text_primary"],
+            corner_radius=6
+        )
+        settings_btn.grid(row=0, column=1, sticky="e", padx=(8, 8))
+        attach_tooltip(settings_btn, "Game settings (save folder, exe, app settings).")
+
+        # Delete game button (icon)
         del_btn = ctk.CTkButton(
             title_row,
-            text="Remove",
+            text=ICON_REMOVE,
             command=lambda: self._remove_game(game),
-            width=80,
+            width=28,
             height=28,
-            font=ui_font(size=11),
+            font=icon_font(size=ICON_FONT_SIZE, weight="bold"),
             fg_color="transparent",
             hover_color=BRAND_COLORS["accent_muted"],
-            text_color=BRAND_COLORS["text_muted"]
+            text_color=BRAND_COLORS["error"],
+            corner_radius=6
         )
-        del_btn.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        del_btn.grid(row=0, column=2, sticky="e")
+        attach_tooltip(del_btn, "Remove this game from your list.")
         
         developer_text = truncate_text(game.get("developer") or "Custom game", HEADER_DEVELOPER_MAX_CHARS)
         ctk.CTkLabel(
@@ -744,117 +789,85 @@ class GameVaultWindow(ctk.CTk):
         ).pack(fill="x")
         
         # Actions row
-        actions = ctk.CTkFrame(self.content_area, fg_color="transparent")
+        actions = ctk.CTkScrollableFrame(
+            self.content_area,
+            fg_color="transparent",
+            orientation="horizontal",
+            height=ACTION_BUTTON_HEIGHT + 18,
+            scrollbar_button_color=BRAND_COLORS["border"],
+            scrollbar_button_hover_color=BRAND_COLORS["border_hover"]
+        )
         actions.pack(fill="x", pady=(0, 20))
+        action_items = []
 
-        play_btn = ctk.CTkButton(
-            actions,
-            text="Play",
-            command=lambda: self._launch_game(game),
-            height=40,
-            font=ui_font(size=13, weight="bold"),
-            fg_color=BRAND_COLORS["success"],
-            hover_color=BRAND_COLORS["success"],
-            text_color=BRAND_COLORS["bg_dark"],
-            corner_radius=6
+        action_items.append(
+            self._create_action_item(
+                actions,
+                icon=ICON_PLAY,
+                label="Play",
+                command=lambda: self._launch_game(game),
+                fg_color=BRAND_COLORS["success"],
+                hover_color=BRAND_COLORS["success"],
+                text_color=BRAND_COLORS["bg_dark"],
+                tooltip="Launch the game (choose the .exe if needed).",
+                font_size=13
+            )
         )
-        play_btn.pack(side="left", padx=(0, 12))
-        attach_tooltip(play_btn, "Launch the game (choose the .exe if needed).")
 
-        backup_play_btn = ctk.CTkButton(
-            actions,
-            text="Backup & Play",
-            command=lambda: self._backup_and_play(game),
-            height=40,
-            font=ui_font(size=13, weight="bold"),
-            fg_color=BRAND_COLORS["accent_muted"],
-            hover_color=BRAND_COLORS["accent"],
-            text_color=BRAND_COLORS["text_primary"],
-            corner_radius=6
+        action_items.append(
+            self._create_action_item(
+                actions,
+                icon=ICON_BACKUP_PLAY,
+                label="Backup & Play",
+                command=lambda: self._backup_and_play(game),
+                fg_color=BRAND_COLORS["accent_bg"],
+                hover_color=BRAND_COLORS["accent_muted"],
+                text_color=BRAND_COLORS["text_primary"],
+                tooltip="Create a backup first, then launch the game."
+            )
         )
-        backup_play_btn.pack(side="left", padx=(0, 12))
-        attach_tooltip(backup_play_btn, "Create a backup first, then launch the game.")
-        
-        backup_btn = ctk.CTkButton(
-            actions,
-            text="Backup Now",
-            command=lambda: self._backup_game(game),
-            height=40,
-            font=ui_font(size=13, weight="bold"),
-            fg_color=BRAND_COLORS["accent"],
-            hover_color=BRAND_COLORS["accent_hover"],
-            corner_radius=6
-        )
-        backup_btn.pack(side="left", padx=(0, 12))
-        attach_tooltip(backup_btn, "Create a backup of the save folder now.")
-        
-        open_save_btn = ctk.CTkButton(
-            actions,
-            text="Open Save Folder",
-            command=lambda: self._open_save_folder(game),
-            height=40,
-            font=ui_font(size=13),
-            fg_color=BRAND_COLORS["bg_hover"],
-            hover_color=BRAND_COLORS["border_hover"],
-            corner_radius=6
-        )
-        open_save_btn.pack(side="left")
-        attach_tooltip(open_save_btn, "Open the save folder for this game.")
 
-        script_btn = ctk.CTkButton(
-            actions,
-            text="Create Backup Script",
-            command=lambda: self._generate_quick_backup_bat(game),
-            height=40,
-            font=ui_font(size=13),
-            fg_color=BRAND_COLORS["bg_hover"],
-            hover_color=BRAND_COLORS["border_hover"],
-            corner_radius=6
+        action_items.append(
+            self._create_action_item(
+                actions,
+                icon=ICON_BACKUP,
+                label="Backup Now",
+                command=lambda: self._backup_game(game),
+                fg_color=BRAND_COLORS["accent"],
+                hover_color=BRAND_COLORS["accent_hover"],
+                text_color=BRAND_COLORS["text_primary"],
+                tooltip="Create a backup of the save folder now."
+            )
         )
-        script_btn.pack(side="left", padx=(12, 0))
-        attach_tooltip(script_btn, "Generate a .bat file to run backups quickly.")
-        
-        # Save path info
-        save_path = game.get("save_path", "")
-        expanded_path = os.path.expandvars(save_path) if save_path else ""
-        path_exists = Path(expanded_path).exists() if expanded_path else False
-        
-        path_card = ctk.CTkFrame(self.content_area, fg_color=BRAND_COLORS["bg_card"], corner_radius=8)
-        path_card.pack(fill="x", pady=(0, 24))
-        
-        path_inner = ctk.CTkFrame(path_card, fg_color="transparent")
-        path_inner.pack(fill="x", padx=16, pady=12)
-        
-        ctk.CTkLabel(
-            path_inner,
-            text="Save Location",
-            font=ui_font(size=11, weight="bold"),
-            text_color=BRAND_COLORS["text_muted"],
-            anchor="w"
-        ).pack(fill="x")
-        
-        status_color = BRAND_COLORS["success"] if path_exists else BRAND_COLORS["error"]
-        status_text = expanded_path if path_exists else f"Not found: {expanded_path or 'Not set'}"
-        
-        ctk.CTkLabel(
-            path_inner,
-            text=status_text,
-            font=ui_font(size=12),
-            text_color=status_color,
-            anchor="w"
-        ).pack(fill="x", pady=(4, 0))
 
-        btn_text = "Change Save Folder" if path_exists else "Set Save Folder"
-        ctk.CTkButton(
-            path_inner,
-            text=btn_text,
-            command=lambda g=game: self._set_save_path(g),
-            height=28,
-            font=ui_font(size=11, weight="bold"),
-            fg_color=BRAND_COLORS["accent"],
-            hover_color=BRAND_COLORS["accent_hover"],
-            corner_radius=6
-        ).pack(anchor="w", pady=(8, 0))
+        action_items.append(
+            self._create_action_item(
+                actions,
+                icon=ICON_OPEN_FOLDER,
+                label="Open Save",
+                command=lambda: self._open_save_folder(game),
+                fg_color=BRAND_COLORS["bg_hover"],
+                hover_color=BRAND_COLORS["border_hover"],
+                text_color=BRAND_COLORS["text_secondary"],
+                tooltip="Open the save folder for this game."
+            )
+        )
+
+        action_items.append(
+            self._create_action_item(
+                actions,
+                icon=ICON_SCRIPT,
+                label="Backup Script",
+                command=lambda: self._generate_quick_backup_bat(game),
+                fg_color=BRAND_COLORS["bg_hover"],
+                hover_color=BRAND_COLORS["border_hover"],
+                text_color=BRAND_COLORS["text_secondary"],
+                tooltip="Generate a .bat file to run backups quickly."
+            )
+        )
+
+        for idx, item in enumerate(action_items):
+            item.grid(row=0, column=idx, padx=(0, ACTION_BUTTON_GAP), pady=(0, 2))
         
         # Backups section
         backups_header = ctk.CTkFrame(self.content_area, fg_color="transparent")
@@ -992,6 +1005,35 @@ class GameVaultWindow(ctk.CTk):
 
             for backup in collection_backups:
                 self._create_backup_row(backups_inner, backup, game)
+
+    def _create_action_item(
+        self,
+        parent: Any,
+        *,
+        icon: str,
+        label: str,
+        command: Any,
+        fg_color: str,
+        hover_color: str,
+        text_color: str,
+        tooltip: str,
+        font_size: int = ACTION_BUTTON_FONT_SIZE
+    ) -> ctk.CTkButton:
+        """Create an inline icon + text action button for the game toolbar."""
+        btn = ctk.CTkButton(
+            parent,
+            text=f"{icon}  {label}",
+            command=command,
+            height=ACTION_BUTTON_HEIGHT,
+            font=ui_font(size=font_size, weight="bold"),
+            fg_color=fg_color,
+            hover_color=hover_color,
+            text_color=text_color,
+            corner_radius=6
+        )
+        attach_tooltip(btn, tooltip)
+        return btn
+
     
     def _create_backup_row(self, parent, backup: Dict[str, Any], game: Dict[str, Any]):
         """Create a backup row"""
@@ -1097,20 +1139,73 @@ class GameVaultWindow(ctk.CTk):
             self._refresh_games()
             self._select_game(dialog.result)
 
-    def _get_game_collections(self, game_id: str) -> List[Dict[str, str]]:
+    def _get_game_collections(self, game_id: str) -> List[Dict[str, Any]]:
         collections_by_game = self.config.setdefault("backup_collections", {})
         collections = collections_by_game.get(game_id)
+        default_limit = self.config.get("max_backups", DEFAULT_COLLECTION_LIMIT)
+        try:
+            default_limit = int(default_limit)
+        except (TypeError, ValueError):
+            default_limit = DEFAULT_COLLECTION_LIMIT
+
+        updated = False
         if not collections:
-            collections = [{"id": "default", "name": "Main"}]
+            collections = [{
+                "id": "default",
+                "name": "Main",
+                "limit_enabled": False,
+                "max_backups": default_limit,
+            }]
             collections_by_game[game_id] = collections
-            self.config_manager.save_config(self.config)
+            updated = True
+
         if not any(collection.get("id") == "default" for collection in collections):
-            collections.insert(0, {"id": "default", "name": "Main"})
+            collections.insert(0, {
+                "id": "default",
+                "name": "Main",
+                "limit_enabled": False,
+                "max_backups": default_limit,
+            })
+            updated = True
+
+        for collection in collections:
+            if "limit_enabled" not in collection:
+                collection["limit_enabled"] = False
+                updated = True
+            if "max_backups" not in collection:
+                collection["max_backups"] = default_limit
+                updated = True
+            try:
+                collection["max_backups"] = int(collection.get("max_backups", default_limit))
+            except (TypeError, ValueError):
+                collection["max_backups"] = default_limit
+                updated = True
+
+        if updated:
             self.config_manager.save_config(self.config)
         return collections
 
     def _get_collection_map(self, game_id: str) -> Dict[str, str]:
         return {collection["id"]: collection["name"] for collection in self._get_game_collections(game_id)}
+
+    def _get_collection_retention(self, game_id: str, collection_id: str) -> Dict[str, Any]:
+        default_limit = self.config.get("max_backups", DEFAULT_COLLECTION_LIMIT)
+        try:
+            default_limit = int(default_limit)
+        except (TypeError, ValueError):
+            default_limit = DEFAULT_COLLECTION_LIMIT
+
+        for collection in self._get_game_collections(game_id):
+            if collection.get("id") == collection_id:
+                enabled = bool(collection.get("limit_enabled", False))
+                limit = collection.get("max_backups", default_limit)
+                try:
+                    limit = int(limit)
+                except (TypeError, ValueError):
+                    limit = default_limit
+                return {"enabled": enabled, "limit": limit}
+
+        return {"enabled": False, "limit": default_limit}
 
     def _collection_is_empty(self, game_id: str, collection_id: str) -> bool:
         if not self.engine:
@@ -1123,12 +1218,22 @@ class GameVaultWindow(ctk.CTk):
         if not name:
             return None
         collections = self._get_game_collections(game_id)
+        default_limit = self.config.get("max_backups", DEFAULT_COLLECTION_LIMIT)
+        try:
+            default_limit = int(default_limit)
+        except (TypeError, ValueError):
+            default_limit = DEFAULT_COLLECTION_LIMIT
         for collection in collections:
             if collection.get("name", "").lower() == name.lower():
                 return collection.get("id")
         import uuid
         new_id = uuid.uuid4().hex[:8]
-        collections.append({"id": new_id, "name": name})
+        collections.append({
+            "id": new_id,
+            "name": name,
+            "limit_enabled": False,
+            "max_backups": default_limit,
+        })
         self.config_manager.save_config(self.config)
         return new_id
 
@@ -1257,6 +1362,18 @@ class GameVaultWindow(ctk.CTk):
             self.selected_game = None
             self._refresh_games()
             self._build_placeholder_content()
+
+    def _show_game_settings(self, game: Dict[str, Any]):
+        """Show game-specific settings menu."""
+        dialog = GameSettingsDialog(
+            self,
+            game,
+            on_set_save_path=self._set_save_path,
+            on_set_exe_path=self._set_game_exe_path,
+            on_open_save_folder=self._open_save_folder,
+            on_open_settings=self._show_settings
+        )
+        self.wait_window(dialog)
     
     def _show_settings(self):
         """Show settings dialog"""
@@ -1269,7 +1386,10 @@ class GameVaultWindow(ctk.CTk):
             
             # Re-initialize engine
             if self.config.get("backup_directory"):
-                self.engine = BackupEngine(self.config["backup_directory"])
+                self.engine = BackupEngine(
+                    self.config["backup_directory"],
+                    max_backups=self.config.get("max_backups", DEFAULT_COLLECTION_LIMIT),
+                )
             
             # Refresh view
             if self.selected_game:
@@ -1410,12 +1530,17 @@ class GameVaultWindow(ctk.CTk):
         spin()
         
         def do_backup():
+            retention = self._get_collection_retention(game.get("id", ""), collection_id)
+            retention_enabled = retention.get("enabled", False)
+            retention_limit = retention.get("limit") if retention_enabled else None
             result = self.engine.backup_game(
                 game.get("id", ""),
                 game.get("name", ""),
                 expanded_path,
                 display_name=display_name,
-                collection_id=collection_id
+                collection_id=collection_id,
+                retention_enabled=retention_enabled,
+                retention_limit=retention_limit,
             )
             self.after(0, lambda: self._on_backup_complete(result, game, post_backup_action))
         
@@ -2029,6 +2154,64 @@ class ManageCollectionsDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             body,
+            text="Retention Limit (Per Collection)",
+            font=ui_font(size=11, weight="bold"),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w"
+        ).pack(fill="x")
+
+        self.retention_enabled_var = ctk.BooleanVar(value=False)
+        self.retention_switch = ctk.CTkSwitch(
+            body,
+            text="Auto-delete old backups for this collection",
+            variable=self.retention_enabled_var,
+            command=self._apply_retention_settings,
+            font=ui_font(size=11),
+            text_color=BRAND_COLORS["text_secondary"],
+            fg_color=BRAND_COLORS["bg_hover"],
+            progress_color=BRAND_COLORS["accent"],
+            button_color=BRAND_COLORS["accent"],
+            button_hover_color=BRAND_COLORS["accent_hover"]
+        )
+        self.retention_switch.pack(fill="x", pady=(6, 6))
+
+        limit_row = ctk.CTkFrame(body, fg_color="transparent")
+        limit_row.pack(fill="x", pady=(0, 16))
+
+        self.retention_entry = ctk.CTkEntry(
+            limit_row,
+            height=32,
+            font=ui_font(size=11),
+            fg_color=BRAND_COLORS["bg_card"],
+            border_color=BRAND_COLORS["border"],
+            border_width=1,
+            placeholder_text="Max backups (e.g., 12)"
+        )
+        self.retention_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        self.retention_apply_btn = ctk.CTkButton(
+            limit_row,
+            text="Apply Limit",
+            command=self._apply_retention_settings,
+            height=32,
+            font=ui_font(size=11, weight="bold"),
+            fg_color=BRAND_COLORS["bg_hover"],
+            hover_color=BRAND_COLORS["border_hover"],
+            corner_radius=6
+        )
+        self.retention_apply_btn.pack(side="right")
+
+        self.retention_hint = ctk.CTkLabel(
+            body,
+            text="Auto-delete is OFF by default.",
+            font=ui_font(size=10),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w"
+        )
+        self.retention_hint.pack(fill="x", pady=(0, 16))
+
+        ctk.CTkLabel(
+            body,
             text="Create New Collection",
             font=ui_font(size=11, weight="bold"),
             text_color=BRAND_COLORS["text_muted"],
@@ -2110,6 +2293,7 @@ class ManageCollectionsDialog(ctk.CTkToplevel):
         if selected_name:
             self.rename_entry.insert(0, selected_name)
         self._update_delete_state()
+        self._load_retention_settings()
 
     def _sync_selection(self) -> None:
         selected_name = self.collection_var.get()
@@ -2117,6 +2301,7 @@ class ManageCollectionsDialog(ctk.CTkToplevel):
         if selected_name:
             self.rename_entry.insert(0, selected_name)
         self._update_delete_state()
+        self._load_retention_settings()
 
     def _update_delete_state(self) -> None:
         selected_name = self.collection_var.get()
@@ -2135,6 +2320,68 @@ class ManageCollectionsDialog(ctk.CTkToplevel):
             return
         self.delete_btn.configure(state="normal")
         self.delete_hint.configure(text="")
+
+    def _get_selected_collection(self) -> Optional[Dict[str, Any]]:
+        selected_name = self.collection_var.get()
+        collection_id = self.name_to_id.get(selected_name)
+        if not collection_id:
+            return None
+        for collection in self.collections:
+            if collection.get("id") == collection_id:
+                return collection
+        return None
+
+    def _load_retention_settings(self) -> None:
+        collection = self._get_selected_collection()
+        if not collection:
+            self.retention_enabled_var.set(False)
+            self.retention_entry.configure(state="disabled")
+            self.retention_entry.delete(0, "end")
+            return
+
+        default_limit = self.parent_window.config.get("max_backups", DEFAULT_COLLECTION_LIMIT)
+        try:
+            default_limit = int(default_limit)
+        except (TypeError, ValueError):
+            default_limit = DEFAULT_COLLECTION_LIMIT
+
+        enabled = bool(collection.get("limit_enabled", False))
+        limit_value = collection.get("max_backups", default_limit)
+        try:
+            limit_value = int(limit_value)
+        except (TypeError, ValueError):
+            limit_value = default_limit
+
+        self.retention_enabled_var.set(enabled)
+        self.retention_entry.configure(state="normal")
+        self.retention_entry.delete(0, "end")
+        self.retention_entry.insert(0, str(limit_value))
+
+    def _parse_retention_limit(self) -> Optional[int]:
+        raw = self.retention_entry.get().strip()
+        if not raw:
+            return None
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    def _apply_retention_settings(self) -> None:
+        collection = self._get_selected_collection()
+        if not collection:
+            return
+
+        enabled = bool(self.retention_enabled_var.get())
+        limit_value = self._parse_retention_limit()
+        if limit_value is None:
+            messagebox.showerror("Invalid Limit", "Enter a whole number greater than 0.")
+            return
+
+        collection["max_backups"] = limit_value
+        collection["limit_enabled"] = enabled
+        self.parent_window.config_manager.save_config(self.parent_window.config)
+        self._load_retention_settings()
 
     def _create_collection(self) -> None:
         name = self.new_entry.get().strip()
@@ -2745,6 +2992,275 @@ class CustomGameDialog(ctk.CTkToplevel):
 
 
 # ==========================================
+# GAME SETTINGS DIALOG
+# ==========================================
+class GameSettingsDialog(ctk.CTkToplevel):
+    """Game-specific settings dialog."""
+
+    def __init__(
+        self,
+        parent,
+        game: Dict[str, Any],
+        *,
+        on_set_save_path,
+        on_set_exe_path,
+        on_open_save_folder,
+        on_open_settings
+    ):
+        super().__init__(parent)
+
+        self.title("Game Settings")
+        self.geometry("520x360")
+        schedule_app_icon(self)
+        self.transient(parent)
+        self.grab_set()
+        self.configure(fg_color=BRAND_COLORS["bg_dark"])
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self._safe_close)
+
+        self.game = game
+        self._on_set_save_path = on_set_save_path
+        self._on_set_exe_path = on_set_exe_path
+        self._on_open_save_folder = on_open_save_folder
+        self._on_open_settings = on_open_settings
+
+        self.save_status = None
+        self.exe_status = None
+
+        # Center dialog
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - 520) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 360) // 2
+        self.geometry(f"+{x}+{y}")
+
+        self._build_ui()
+        self._refresh_status()
+
+    def _build_ui(self):
+        content = ctk.CTkFrame(self, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=28, pady=24)
+
+        ctk.CTkLabel(
+            content,
+            text="Game Settings",
+            font=ui_font(size=20, weight="bold"),
+            text_color=BRAND_COLORS["text_primary"],
+            anchor="w"
+        ).pack(fill="x")
+
+        ctk.CTkLabel(
+            content,
+            text=truncate_text(self.game.get("name", "Unknown"), HEADER_GAME_NAME_MAX_CHARS),
+            font=ui_font(size=12),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w"
+        ).pack(fill="x", pady=(4, 18))
+
+        info_row = ctk.CTkFrame(content, fg_color=BRAND_COLORS["bg_card"], corner_radius=8)
+        info_row.pack(fill="x", pady=(0, 16))
+
+        info_inner = ctk.CTkFrame(info_row, fg_color="transparent")
+        info_inner.pack(fill="x", padx=16, pady=12)
+
+        ctk.CTkLabel(
+            info_inner,
+            text="Save Folder",
+            font=ui_font(size=11, weight="bold"),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w"
+        ).pack(fill="x")
+
+        self.save_status = ctk.CTkLabel(
+            info_inner,
+            text="",
+            font=ui_font(size=12),
+            text_color=BRAND_COLORS["text_secondary"],
+            anchor="w"
+        )
+        self.save_status.pack(fill="x", pady=(4, 0))
+
+        save_actions = ctk.CTkFrame(info_inner, fg_color="transparent")
+        save_actions.pack(fill="x", pady=(10, 0))
+
+        ctk.CTkButton(
+            save_actions,
+            text="Change Save Folder",
+            command=self._change_save_folder,
+            height=32,
+            font=ui_font(size=11, weight="bold"),
+            fg_color=BRAND_COLORS["accent"],
+            hover_color=BRAND_COLORS["accent_hover"],
+            corner_radius=6
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            save_actions,
+            text="Open Save Folder",
+            command=self._open_save_folder,
+            height=32,
+            font=ui_font(size=11),
+            fg_color=BRAND_COLORS["bg_hover"],
+            hover_color=BRAND_COLORS["border_hover"],
+            corner_radius=6
+        ).pack(side="left", padx=(10, 0))
+
+        exe_row = ctk.CTkFrame(content, fg_color=BRAND_COLORS["bg_card"], corner_radius=8)
+        exe_row.pack(fill="x", pady=(0, 16))
+
+        exe_inner = ctk.CTkFrame(exe_row, fg_color="transparent")
+        exe_inner.pack(fill="x", padx=16, pady=12)
+
+        ctk.CTkLabel(
+            exe_inner,
+            text="Game Executable",
+            font=ui_font(size=11, weight="bold"),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w"
+        ).pack(fill="x")
+
+        self.exe_status = ctk.CTkLabel(
+            exe_inner,
+            text="",
+            font=ui_font(size=12),
+            text_color=BRAND_COLORS["text_secondary"],
+            anchor="w"
+        )
+        self.exe_status.pack(fill="x", pady=(4, 0))
+
+        exe_actions = ctk.CTkFrame(exe_inner, fg_color="transparent")
+        exe_actions.pack(fill="x", pady=(10, 0))
+
+        ctk.CTkButton(
+            exe_actions,
+            text="Change Game EXE",
+            command=self._change_exe_path,
+            height=32,
+            font=ui_font(size=11, weight="bold"),
+            fg_color=BRAND_COLORS["bg_hover"],
+            hover_color=BRAND_COLORS["border_hover"],
+            corner_radius=6
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            exe_actions,
+            text="Open Game Folder",
+            command=self._open_game_folder,
+            height=32,
+            font=ui_font(size=11),
+            fg_color=BRAND_COLORS["bg_hover"],
+            hover_color=BRAND_COLORS["border_hover"],
+            corner_radius=6
+        ).pack(side="left", padx=(10, 0))
+
+        footer = ctk.CTkFrame(content, fg_color="transparent")
+        footer.pack(fill="x")
+
+        ctk.CTkLabel(
+            footer,
+            text="Changes are saved automatically.",
+            font=ui_font(size=11),
+            text_color=BRAND_COLORS["text_muted"],
+            anchor="w"
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            footer,
+            text="App Settings",
+            command=self._open_app_settings,
+            height=32,
+            font=ui_font(size=11),
+            fg_color=BRAND_COLORS["bg_hover"],
+            hover_color=BRAND_COLORS["border_hover"],
+            corner_radius=6
+        ).pack(side="right", padx=(0, 8))
+
+        ctk.CTkButton(
+            footer,
+            text="Close",
+            command=self._safe_close,
+            height=32,
+            font=ui_font(size=11, weight="bold"),
+            fg_color=BRAND_COLORS["accent"],
+            hover_color=BRAND_COLORS["accent_hover"],
+            corner_radius=6
+        ).pack(side="right")
+
+    def _refresh_status(self):
+        save_path = (self.game.get("save_path") or "").strip()
+        expanded_save = os.path.expandvars(save_path) if save_path else ""
+        save_exists = bool(expanded_save) and Path(expanded_save).exists()
+
+        if not expanded_save:
+            save_text = "Not set"
+            save_color = BRAND_COLORS["text_muted"]
+        elif save_exists:
+            save_text = truncate_text(expanded_save, GAME_SETTINGS_PATH_MAX_CHARS)
+            save_color = BRAND_COLORS["success"]
+        else:
+            save_text = truncate_text(f"Not found: {expanded_save}", GAME_SETTINGS_PATH_MAX_CHARS)
+            save_color = BRAND_COLORS["error"]
+
+        if self.save_status is not None:
+            self.save_status.configure(text=save_text, text_color=save_color)
+
+        exe_path = (self.game.get("exe_path") or "").strip()
+        expanded_exe = os.path.expandvars(exe_path) if exe_path else ""
+        exe_exists = bool(expanded_exe) and Path(expanded_exe).exists()
+
+        if not expanded_exe:
+            exe_text = "Not set"
+            exe_color = BRAND_COLORS["text_muted"]
+        elif exe_exists:
+            exe_text = truncate_text(expanded_exe, GAME_SETTINGS_PATH_MAX_CHARS)
+            exe_color = BRAND_COLORS["success"]
+        else:
+            exe_text = truncate_text(f"Not found: {expanded_exe}", GAME_SETTINGS_PATH_MAX_CHARS)
+            exe_color = BRAND_COLORS["error"]
+
+        if self.exe_status is not None:
+            self.exe_status.configure(text=exe_text, text_color=exe_color)
+
+    def _change_save_folder(self):
+        self._on_set_save_path(self.game)
+        self._refresh_status()
+
+    def _change_exe_path(self):
+        self._on_set_exe_path(self.game)
+        self._refresh_status()
+
+    def _open_save_folder(self):
+        self._on_open_save_folder(self.game)
+        self._refresh_status()
+
+    def _open_game_folder(self):
+        exe_path = (self.game.get("exe_path") or "").strip()
+        expanded_exe = os.path.expandvars(exe_path) if exe_path else ""
+        if not expanded_exe or not Path(expanded_exe).exists():
+            messagebox.showerror("Not found", "Game executable not set or missing.")
+            return
+
+        folder = str(Path(expanded_exe).parent)
+        try:
+            system = platform.system().lower()
+            if system == "windows":
+                os.startfile(folder)
+                return
+            if system == "darwin":
+                subprocess.Popen(["open", folder])
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as exc:
+            messagebox.showerror("Open Failed", f"Could not open the game folder:\n{exc}")
+
+    def _open_app_settings(self):
+        self._safe_close()
+        self._on_open_settings()
+
+    def _safe_close(self):
+        safe_close_toplevel(self)
+
+
+# ==========================================
 # SETTINGS DIALOG
 # ==========================================
 class SettingsDialog(ctk.CTkToplevel):
@@ -2830,45 +3346,6 @@ class SettingsDialog(ctk.CTkToplevel):
             hover_color=BRAND_COLORS["border_hover"]
         ).pack(side="right")
         
-        # Max backups
-        max_frame = ctk.CTkFrame(body, fg_color="transparent")
-        max_frame.pack(fill="x", pady=(20, 0))
-        
-        ctk.CTkLabel(
-            max_frame,
-            text="Maximum Backups per Game",
-            font=ui_font(size=11, weight="bold"),
-            text_color=BRAND_COLORS["text_muted"],
-            anchor="w"
-        ).pack(fill="x")
-        
-        slider_row = ctk.CTkFrame(max_frame, fg_color="transparent")
-        slider_row.pack(fill="x", pady=(8, 0))
-        
-        self.max_var = ctk.IntVar(value=self.config.get("max_backups", 10))
-        
-        self.max_slider = ctk.CTkSlider(
-            slider_row,
-            from_=1,
-            to=50,
-            number_of_steps=49,
-            variable=self.max_var,
-            command=self._on_slider,
-            progress_color=BRAND_COLORS["accent"],
-            button_color=BRAND_COLORS["accent"],
-            button_hover_color=BRAND_COLORS["accent_hover"]
-        )
-        self.max_slider.pack(side="left", fill="x", expand=True, padx=(0, 16))
-        
-        self.max_label = ctk.CTkLabel(
-            slider_row,
-            text=f"{self.max_var.get()} backups",
-            font=ui_font(size=12),
-            text_color=BRAND_COLORS["text_secondary"],
-            width=80
-        )
-        self.max_label.pack(side="right")
-        
         # Buttons
         btn_frame = ctk.CTkFrame(content, fg_color="transparent")
         btn_frame.grid(row=1, column=0, sticky="ew")
@@ -2901,9 +3378,6 @@ class SettingsDialog(ctk.CTkToplevel):
             self.dir_entry.delete(0, "end")
             self.dir_entry.insert(0, path)
     
-    def _on_slider(self, value):
-        self.max_label.configure(text=f"{int(value)} backups")
-    
     def _save(self):
         backup_dir = self.dir_entry.get().strip()
         
@@ -2912,7 +3386,6 @@ class SettingsDialog(ctk.CTkToplevel):
             return
         
         self.config["backup_directory"] = backup_dir
-        self.config["max_backups"] = self.max_var.get()
         self.result = self.config
         self._safe_close()
 
