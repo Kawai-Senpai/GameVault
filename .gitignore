@@ -6,6 +6,9 @@ __pycache__
 node_modules/
 dist/
 build/
+src-tauri/target/
 *.log
 *.spec
 data/.cache/
+temp
+.infinitecode
