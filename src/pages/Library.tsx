@@ -28,7 +28,8 @@ import {
   RefreshCw,
   Filter,
 } from "lucide-react";
-import { cn, getGameInitials, getCardColor, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import GameCover from "@/components/GameCover";
 import type { Game } from "@/types";
 
 type ViewMode = "grid" | "list";
@@ -218,47 +219,21 @@ export default function Library() {
 
 // ─── Game Card (Grid View) ───────────────────────────────────
 function GameCard({ game, onClick }: { game: Game; onClick: () => void }) {
-  const [imgLoaded, setImgLoaded] = useState(false);
-  const [imgError, setImgError] = useState(false);
-  const coverSrc = game.custom_cover_path || game.cover_url;
-  const showImage = coverSrc && !imgError;
-
   return (
     <button
       onClick={onClick}
       className="group game-card flex flex-col rounded-xl overflow-hidden border border-border bg-card transition-all hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 cursor-pointer text-left animate-fade-in relative"
     >
       {/* Cover */}
-      <div className="relative aspect-3/4 w-full overflow-hidden bg-muted">
-        {showImage ? (
-          <>
-            {!imgLoaded && (
-              <div className="absolute inset-0 skeleton" />
-            )}
-            <img
-              src={coverSrc}
-              alt={game.name}
-              className={cn(
-                "game-card-cover w-full h-full object-cover",
-                imgLoaded ? "opacity-100" : "opacity-0"
-              )}
-              onLoad={() => setImgLoaded(true)}
-              onError={() => setImgError(true)}
-              loading="lazy"
-            />
-          </>
-        ) : (
-          <div
-            className={cn(
-              "w-full h-full flex items-center justify-center bg-linear-to-br",
-              getCardColor(game.id)
-            )}
-          >
-            <span className="text-2xl font-bold text-foreground/60">
-              {getGameInitials(game.name)}
-            </span>
-          </div>
-        )}
+      <div className="relative aspect-3/4 w-full overflow-hidden">
+        <GameCover
+          gameId={game.id}
+          gameName={game.name}
+          coverUrl={game.cover_url}
+          customCoverPath={game.custom_cover_path}
+          className="w-full h-full game-card-cover"
+          initialsClassName="text-2xl"
+        />
 
         {/* Overlay gradient */}
         <div className="absolute inset-0 bg-linear-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -298,36 +273,21 @@ function GameCard({ game, onClick }: { game: Game; onClick: () => void }) {
 
 // ─── Game List Item ──────────────────────────────────────────
 function GameListItem({ game, onClick }: { game: Game; onClick: () => void }) {
-  const [imgError, setImgError] = useState(false);
-  const coverSrc = game.custom_cover_path || game.cover_url;
-  const showImage = coverSrc && !imgError;
-
   return (
     <button
       onClick={onClick}
       className="w-full flex items-center gap-3 rounded-lg px-3 py-2 transition-all hover:bg-accent cursor-pointer text-left group"
     >
       {/* Thumbnail */}
-      <div className="size-10 rounded-lg overflow-hidden shrink-0 bg-muted">
-        {showImage ? (
-          <img
-            src={coverSrc}
-            alt={game.name}
-            className="w-full h-full object-cover"
-            onError={() => setImgError(true)}
-            loading="lazy"
-          />
-        ) : (
-          <div
-            className={cn(
-              "w-full h-full flex items-center justify-center bg-linear-to-br text-xs font-bold",
-              getCardColor(game.id)
-            )}
-          >
-            {getGameInitials(game.name)}
-          </div>
-        )}
-      </div>
+      <GameCover
+        gameId={game.id}
+        gameName={game.name}
+        coverUrl={game.cover_url}
+        customCoverPath={game.custom_cover_path}
+        className="size-10 rounded-lg shrink-0"
+        singleChar
+        initialsClassName="text-xs"
+      />
 
       {/* Info */}
       <div className="flex-1 min-w-0">

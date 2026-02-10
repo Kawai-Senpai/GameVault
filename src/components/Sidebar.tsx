@@ -28,8 +28,8 @@ import {
   FolderOpen,
   StickyNote,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { getGameInitials, getCardColor, truncateText } from "@/lib/utils";
+import { cn, truncateText } from "@/lib/utils";
+import GameCover from "@/components/GameCover";
 
 interface NavItem {
   path: string;
@@ -273,8 +273,6 @@ interface GameItemProps {
 }
 
 function GameItem({ game, isSelected, collapsed, onClick }: GameItemProps) {
-  const coverSrc = game.custom_cover_path || game.cover_url;
-
   if (collapsed) {
     return (
       <Tooltip>
@@ -288,22 +286,15 @@ function GameItem({ game, isSelected, collapsed, onClick }: GameItemProps) {
                 : "hover:bg-sidebar-accent/50"
             )}
           >
-            {coverSrc ? (
-              <img
-                src={coverSrc}
-                alt={game.name}
-                className="size-5 rounded object-cover"
-              />
-            ) : (
-              <div
-                className={cn(
-                  "size-5 rounded flex items-center justify-center text-[8px] font-bold bg-linear-to-br",
-                  getCardColor(game.id)
-                )}
-              >
-                {getGameInitials(game.name).charAt(0)}
-              </div>
-            )}
+            <GameCover
+              gameId={game.id}
+              gameName={game.name}
+              coverUrl={game.cover_url}
+              customCoverPath={game.custom_cover_path}
+              className="size-5 rounded"
+              singleChar
+              initialsClassName="text-[8px]"
+            />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right">{game.name}</TooltipContent>
@@ -321,22 +312,15 @@ function GameItem({ game, isSelected, collapsed, onClick }: GameItemProps) {
           : "hover:bg-sidebar-accent/50 text-sidebar-foreground"
       )}
     >
-      {coverSrc ? (
-        <img
-          src={coverSrc}
-          alt={game.name}
-          className="size-6 rounded object-cover shrink-0"
-        />
-      ) : (
-        <div
-          className={cn(
-            "size-6 rounded flex items-center justify-center text-[9px] font-bold shrink-0 bg-linear-to-br",
-            getCardColor(game.id)
-          )}
-        >
-          {getGameInitials(game.name)}
-        </div>
-      )}
+      <GameCover
+        gameId={game.id}
+        gameName={game.name}
+        coverUrl={game.cover_url}
+        customCoverPath={game.custom_cover_path}
+        className="size-6 rounded shrink-0"
+        singleChar
+        initialsClassName="text-[9px]"
+      />
       <div className="min-w-0 flex-1">
         <div className="text-[11px] font-medium truncate leading-tight">
           {truncateText(game.name, 22)}

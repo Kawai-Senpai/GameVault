@@ -250,6 +250,8 @@ function ScreenshotCard({
   gameName?: string;
   onDelete: () => void;
 }) {
+  const [imgError, setImgError] = useState(false);
+
   const handleOpen = async () => {
     try {
       await invoke("open_screenshot", { path: screenshot.file_path });
@@ -264,12 +266,20 @@ function ScreenshotCard({
         onClick={handleOpen}
         className="relative w-full aspect-video bg-muted overflow-hidden cursor-pointer"
       >
-        <img
-          src={`https://asset.localhost/${screenshot.thumbnail_path || screenshot.file_path}`}
-          alt={screenshot.title || "Screenshot"}
-          className="w-full h-full object-cover transition-transform group-hover:scale-105"
-          loading="lazy"
-        />
+        {imgError ? (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-1">
+            <ImageIcon className="size-5 text-muted-foreground/30" />
+            <span className="text-[8px] text-muted-foreground/40">Unable to load</span>
+          </div>
+        ) : (
+          <img
+            src={`https://asset.localhost/${screenshot.thumbnail_path || screenshot.file_path}`}
+            alt={screenshot.title || "Screenshot"}
+            className="w-full h-full object-cover transition-transform group-hover:scale-105"
+            loading="lazy"
+            onError={() => setImgError(true)}
+          />
+        )}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
           <ExternalLink className="size-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
@@ -312,6 +322,8 @@ function ScreenshotListItem({
   gameName?: string;
   onDelete: () => void;
 }) {
+  const [imgError, setImgError] = useState(false);
+
   const handleOpen = async () => {
     try {
       await invoke("open_screenshot", { path: screenshot.file_path });
@@ -326,12 +338,19 @@ function ScreenshotListItem({
         onClick={handleOpen}
         className="size-12 rounded-lg overflow-hidden bg-muted shrink-0 cursor-pointer"
       >
-        <img
-          src={`https://asset.localhost/${screenshot.thumbnail_path || screenshot.file_path}`}
-          alt={screenshot.title || "Screenshot"}
-          className="w-full h-full object-cover"
-          loading="lazy"
-        />
+        {imgError ? (
+          <div className="w-full h-full flex items-center justify-center">
+            <ImageIcon className="size-4 text-muted-foreground/30" />
+          </div>
+        ) : (
+          <img
+            src={`https://asset.localhost/${screenshot.thumbnail_path || screenshot.file_path}`}
+            alt={screenshot.title || "Screenshot"}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={() => setImgError(true)}
+          />
+        )}
       </button>
       <div className="flex-1 min-w-0">
         <div className="text-xs font-medium truncate">

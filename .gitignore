@@ -9,6 +9,5 @@ build/
 src-tauri/target/
 *.log
 *.spec
-data/.cache/
 temp
 .infinitecode

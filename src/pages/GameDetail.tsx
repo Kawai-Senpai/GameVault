@@ -47,7 +47,8 @@ import {
   PinOff,
   Pencil,
 } from "lucide-react";
-import { cn, formatBytes, formatDate, formatRelativeTime, getGameInitials, getCardColor } from "@/lib/utils";
+import { cn, formatBytes, formatDate, formatRelativeTime, getCardColor } from "@/lib/utils";
+import GameCover from "@/components/GameCover";
 import type { Backup, BackupCollection, Screenshot, GameNote } from "@/types";
 
 export default function GameDetail() {
@@ -392,27 +393,19 @@ export default function GameDetail() {
     );
   }
 
-  const coverSrc = game.custom_cover_path || game.cover_url;
   const headerSrc = game.custom_header_path || game.header_url;
 
   return (
     <div className="flex flex-col h-full">
       {/* Hero Header */}
       <div className="relative h-36 shrink-0 overflow-hidden">
-        {headerSrc ? (
-          <img
-            src={headerSrc}
-            alt={game.name}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div
-            className={cn(
-              "w-full h-full bg-linear-to-br",
-              getCardColor(game.id)
-            )}
-          />
-        )}
+        <GameCover
+          gameId={game.id}
+          gameName={game.name}
+          coverUrl={headerSrc}
+          className="w-full h-full"
+          initialsClassName="text-3xl"
+        />
         {/* Gradient overlay */}
         <div className="absolute inset-0 bg-linear-to-t from-background via-background/60 to-transparent" />
 
@@ -420,13 +413,14 @@ export default function GameDetail() {
         <div className="absolute bottom-0 left-0 right-0 px-5 pb-3 flex items-end gap-3">
           {/* Cover thumbnail */}
           <div className="size-16 rounded-xl overflow-hidden border-2 border-background shadow-lg shrink-0 -mb-1">
-            {coverSrc ? (
-              <img src={coverSrc} alt={game.name} className="w-full h-full object-cover" />
-            ) : (
-              <div className={cn("w-full h-full flex items-center justify-center bg-linear-to-br text-lg font-bold", getCardColor(game.id))}>
-                {getGameInitials(game.name)}
-              </div>
-            )}
+            <GameCover
+              gameId={game.id}
+              gameName={game.name}
+              coverUrl={game.cover_url}
+              customCoverPath={game.custom_cover_path}
+              className="w-full h-full"
+              initialsClassName="text-sm"
+            />
           </div>
 
           <div className="flex-1 min-w-0 pb-0.5">
@@ -874,6 +868,8 @@ function BackupRow({
 
 // ─── Screenshot Card ─────────────────────────────────────────
 function ScreenshotCard({ screenshot }: { screenshot: Screenshot }) {
+  const [imgError, setImgError] = useState(false);
+
   const handleOpen = async () => {
     try {
       await invoke("open_screenshot", { path: screenshot.file_path });
@@ -888,12 +884,20 @@ function ScreenshotCard({ screenshot }: { screenshot: Screenshot }) {
       className="group rounded-xl overflow-hidden border border-border bg-card hover:border-primary/20 transition-all cursor-pointer text-left"
     >
       <div className="relative aspect-video bg-muted overflow-hidden">
-        <img
-          src={`https://asset.localhost/${screenshot.thumbnail_path || screenshot.file_path}`}
-          alt={screenshot.title || "Screenshot"}
-          className="w-full h-full object-cover transition-transform group-hover:scale-105"
-          loading="lazy"
-        />
+        {imgError ? (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-muted">
+            <Image className="size-5 text-muted-foreground/30" />
+            <span className="text-[8px] text-muted-foreground/40">Unable to load</span>
+          </div>
+        ) : (
+          <img
+            src={`https://asset.localhost/${screenshot.thumbnail_path || screenshot.file_path}`}
+            alt={screenshot.title || "Screenshot"}
+            className="w-full h-full object-cover transition-transform group-hover:scale-105"
+            loading="lazy"
+            onError={() => setImgError(true)}
+          />
+        )}
       </div>
       <div className="p-2">
         <p className="text-[10px] font-medium truncate">

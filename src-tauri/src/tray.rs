@@ -1,4 +1,5 @@
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     Emitter,
@@ -27,8 +28,18 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         ],
     )?;
 
+    // Load tray icon — try embedded icon first, then fall back to decoding PNG
+    let tray_icon = app.default_window_icon().cloned().unwrap_or_else(|| {
+        // Decode the embedded PNG at compile time using the `image` crate
+        let png_bytes = include_bytes!("../icons/icon.png");
+        let img = image::load_from_memory(png_bytes).expect("Failed to decode icon PNG");
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        Image::new_owned(rgba.into_raw(), w, h)
+    });
+
     let _tray = TrayIconBuilder::new()
-        .icon(app.default_window_icon().cloned().expect("No default icon configured"))
+        .icon(tray_icon)
         .menu(&menu)
         .tooltip("GameVault")
         .on_menu_event(|app, event| match event.id.as_ref() {

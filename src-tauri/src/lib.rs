@@ -204,6 +204,16 @@ pub fn run() {
             // Build system tray
             tray::build_tray(app)?;
 
+            // Set window icon from PNG (ensures correct icon even without full rebuild)
+            if let Some(main_window) = app.get_webview_window("main") {
+                let png_bytes = include_bytes!("../icons/icon.png");
+                let img = image::load_from_memory(png_bytes).expect("Failed to decode icon");
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                let icon = tauri::image::Image::new_owned(rgba.into_raw(), w, h);
+                let _ = main_window.set_icon(icon);
+            }
+
             // Hide overlay window on startup
             if let Some(overlay) = app.get_webview_window("overlay") {
                 let _ = overlay.hide();

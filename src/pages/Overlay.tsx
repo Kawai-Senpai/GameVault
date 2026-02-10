@@ -347,6 +347,10 @@ export default function Overlay() {
                         src={selectedGame.custom_cover_path || selectedGame.cover_url!}
                         alt={selectedGame.name}
                         className="size-10 rounded-lg object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                          (e.target as HTMLImageElement).parentElement?.classList.add('bg-gaming/15', 'flex', 'items-center', 'justify-center');
+                        }}
                       />
                     ) : (
                       <div className="size-10 rounded-lg bg-gaming/15 flex items-center justify-center">
