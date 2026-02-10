@@ -32,6 +32,7 @@ export interface Game {
   is_custom: boolean;
   is_detected: boolean;
   is_favorite: boolean;
+  auto_backup_disabled: boolean;
   play_count: number;
   total_playtime_seconds: number;
   last_played_at: string | null;

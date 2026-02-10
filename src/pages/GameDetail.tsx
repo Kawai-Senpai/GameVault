@@ -7,7 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -47,7 +49,7 @@ import {
   PinOff,
   Pencil,
 } from "lucide-react";
-import { cn, formatBytes, formatDate, formatRelativeTime, getCardColor } from "@/lib/utils";
+import { cn, formatBytes, formatDate, formatRelativeTime } from "@/lib/utils";
 import GameCover from "@/components/GameCover";
 import type { Backup, BackupCollection, Screenshot, GameNote } from "@/types";
 
@@ -66,8 +68,16 @@ export default function GameDetail() {
   const [backupName, setBackupName] = useState("");
   const [coverChangeOpen, setCoverChangeOpen] = useState(false);
   const [gameNotes, setGameNotes] = useState<GameNote[]>([]);
+  const [editableExePath, setEditableExePath] = useState("");
+  const [editableSavePaths, setEditableSavePaths] = useState("");
 
   const game = games.find((g) => g.id === gameId);
+
+  useEffect(() => {
+    if (!game) return;
+    setEditableExePath(game.exe_path || "");
+    setEditableSavePaths(game.save_paths.join("\n"));
+  }, [game?.id]);
 
   // Load backups, screenshots, and notes
   useEffect(() => {
@@ -344,6 +354,60 @@ export default function GameDetail() {
     }
   };
 
+  const handleSavePathConfig = async () => {
+    if (!game) return;
+    const savePaths = editableSavePaths
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      await conn.execute(
+        "UPDATE games SET save_paths = $1, exe_path = $2, updated_at = datetime('now') WHERE id = $3",
+        [JSON.stringify(savePaths), editableExePath.trim() || null, game.id]
+      );
+
+      setGames((prev) =>
+        prev.map((g) =>
+          g.id === game.id
+            ? {
+                ...g,
+                save_paths: savePaths,
+                exe_path: editableExePath.trim() || null,
+                updated_at: new Date().toISOString(),
+              }
+            : g
+        )
+      );
+      toast.success("Game paths updated");
+    } catch (err) {
+      toast.error(`Failed to update paths: ${err}`);
+    }
+  };
+
+  const handlePickConfigSavePath = async () => {
+    try {
+      const folder = await invoke<string | null>("pick_folder_path", {
+        title: "Select Save Directory",
+      });
+      if (!folder) return;
+      setEditableSavePaths((prev) => (prev ? `${prev}\n${folder}` : folder));
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  };
+
+  const handlePickConfigExePath = async () => {
+    try {
+      const path = await invoke<string | null>("pick_exe_path");
+      if (path) setEditableExePath(path);
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  };
+
   const handleTakeScreenshot = async () => {
     if (!game || !settings.screenshots_directory) {
       toast.error("Please set a screenshots directory in Settings first");
@@ -396,9 +460,9 @@ export default function GameDetail() {
   const headerSrc = game.custom_header_path || game.header_url;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Hero Header */}
-      <div className="relative h-36 shrink-0 overflow-hidden">
+      <div className="relative h-32 shrink-0 overflow-hidden sm:h-36">
         <GameCover
           gameId={game.id}
           gameName={game.name}
@@ -410,9 +474,9 @@ export default function GameDetail() {
         <div className="absolute inset-0 bg-linear-to-t from-background via-background/60 to-transparent" />
 
         {/* Game info overlay */}
-        <div className="absolute bottom-0 left-0 right-0 px-5 pb-3 flex items-end gap-3">
+        <div className="absolute bottom-0 left-0 right-0 flex flex-wrap items-end gap-3 px-4 pb-3 sm:px-5">
           {/* Cover thumbnail */}
-          <div className="size-16 rounded-xl overflow-hidden border-2 border-background shadow-lg shrink-0 -mb-1">
+          <div className="-mb-1 size-14 shrink-0 overflow-hidden rounded-xl border-2 border-background shadow-lg sm:size-16">
             <GameCover
               gameId={game.id}
               gameName={game.name}
@@ -423,11 +487,11 @@ export default function GameDetail() {
             />
           </div>
 
-          <div className="flex-1 min-w-0 pb-0.5">
-            <h1 className="text-base font-bold truncate drop-shadow-md">
+          <div className="min-w-0 flex-1 pb-0.5">
+            <h1 className="truncate text-sm font-bold drop-shadow-md sm:text-base">
               {game.name}
             </h1>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-[10px] text-muted-foreground">
                 {game.developer}
               </span>
@@ -441,7 +505,7 @@ export default function GameDetail() {
           </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-1.5 shrink-0 pb-0.5">
+          <div className="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1.5 pb-0.5">
             <Button
               variant="ghost"
               size="icon-sm"
@@ -544,7 +608,7 @@ export default function GameDetail() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
         <div className="px-5 border-b border-border">
-          <TabsList className="bg-transparent h-9 p-0 gap-4">
+          <TabsList className="h-auto flex-wrap gap-4 bg-transparent p-0 py-1.5">
             <TabsTrigger value="backups" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-0 pb-2">
               <Archive className="size-3 mr-1" /> Backups
               <Badge variant="secondary" className="ml-1.5 text-[8px] px-1 py-0">{backups.length}</Badge>
@@ -647,6 +711,96 @@ export default function GameDetail() {
                   {game.notes && <InfoRow label="Notes" value={game.notes} />}
                   <InfoRow label="Added" value={formatDate(game.added_at)} />
                   <InfoRow label="Play Count" value={String(game.play_count)} />
+                </CardContent>
+              </Card>
+
+              {/* Per-Game Auto-Backup Toggle */}
+              <Card>
+                <CardContent className="py-3 px-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[11px] font-medium">Auto-Backup</p>
+                      <p className="text-[9px] text-muted-foreground">
+                        {game.auto_backup_disabled
+                          ? "Disabled — this game is excluded from automatic backups"
+                          : "Enabled — saves are backed up automatically"}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={!game.auto_backup_disabled}
+                      onCheckedChange={async (checked) => {
+                        try {
+                          const db = await import("@tauri-apps/plugin-sql");
+                          const conn = await db.default.load("sqlite:gamevault.db");
+                          await conn.execute(
+                            "UPDATE games SET auto_backup_disabled = $1 WHERE id = $2",
+                            [checked ? 0 : 1, game.id]
+                          );
+                          // Update local state
+                          setGames((prev) =>
+                            prev.map((g) =>
+                              g.id === game.id
+                                ? { ...g, auto_backup_disabled: !checked }
+                                : g
+                            )
+                          );
+                          toast.success(
+                            checked
+                              ? "Auto-backup enabled for this game"
+                              : "Auto-backup disabled for this game"
+                          );
+                        } catch (err) {
+                          toast.error(`${err}`);
+                        }
+                      }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Launch and Save Paths</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div>
+                    <label className="text-[10px] text-muted-foreground block mb-1">
+                      Executable Path
+                    </label>
+                    <div className="flex gap-1.5">
+                      <Input
+                        value={editableExePath}
+                        onChange={(e) => setEditableExePath(e.target.value)}
+                        placeholder="Path to game executable"
+                        className="flex-1 text-[10px]"
+                      />
+                      <Button variant="outline" size="icon-sm" onClick={handlePickConfigExePath}>
+                        <Gamepad2 className="size-3" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-muted-foreground block mb-1">
+                      Save Paths (one per line)
+                    </label>
+                    <div className="flex gap-1.5">
+                      <Textarea
+                        value={editableSavePaths}
+                        onChange={(e) => setEditableSavePaths(e.target.value)}
+                        placeholder="%APPDATA%\\Game\\Saved"
+                        className="min-h-20 text-[10px]"
+                      />
+                      <Button variant="outline" size="icon-sm" onClick={handlePickConfigSavePath}>
+                        <FolderOpen className="size-3" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Button size="sm" onClick={handleSavePathConfig}>
+                    <Save className="size-3" />
+                    Save Path Configuration
+                  </Button>
                 </CardContent>
               </Card>
             </div>

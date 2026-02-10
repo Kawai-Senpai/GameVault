@@ -110,9 +110,7 @@ pub async fn save_screenshot_file(
     );
     thumb.save(&thumb_path).map_err(|e| e.to_string())?;
 
-    let file_size = fs::metadata(&file_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let file_size = fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
 
     Ok(ScreenshotResult {
         id,

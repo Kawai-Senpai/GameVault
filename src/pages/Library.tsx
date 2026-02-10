@@ -95,7 +95,7 @@ export default function Library() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col">
       <Header
         title="Game Library"
         description={`${games.length} games in your vault`}
@@ -125,8 +125,8 @@ export default function Library() {
       />
 
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-5 py-2.5 border-b border-border">
-        <div className="relative flex-1 max-w-xs">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 sm:px-5">
+        <div className="relative min-w-44 flex-1 sm:max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
           <Input
             value={searchQuery}
@@ -138,7 +138,7 @@ export default function Library() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button variant="outline" size="sm" className="gap-1.5 max-sm:flex-1 max-sm:justify-between">
               <SortAsc className="size-3" />
               {sortMode === "name" && "Name"}
               {sortMode === "recent" && "Recent"}
@@ -164,7 +164,7 @@ export default function Library() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="flex items-center border rounded-lg overflow-hidden">
+        <div className="ml-auto flex items-center overflow-hidden rounded-lg border">
           <Button
             variant={viewMode === "grid" ? "secondary" : "ghost"}
             size="icon-sm"
@@ -192,7 +192,7 @@ export default function Library() {
             onAddGame={() => navigate("/add-game")}
           />
         ) : viewMode === "grid" ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 p-5">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(11rem,100%),1fr))] gap-3 p-4 sm:p-5">
             {sortedGames.map((game) => (
               <GameCard
                 key={game.id}
@@ -202,7 +202,7 @@ export default function Library() {
             ))}
           </div>
         ) : (
-          <div className="space-y-1 p-5">
+          <div className="space-y-1 p-4 sm:p-5">
             {sortedGames.map((game) => (
               <GameListItem
                 key={game.id}
@@ -276,7 +276,7 @@ function GameListItem({ game, onClick }: { game: Game; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 rounded-lg px-3 py-2 transition-all hover:bg-accent cursor-pointer text-left group"
+      className="group flex w-full flex-wrap items-center gap-3 rounded-lg px-3 py-2 text-left transition-all hover:bg-accent"
     >
       {/* Thumbnail */}
       <GameCover
@@ -306,7 +306,7 @@ function GameListItem({ game, onClick }: { game: Game; onClick: () => void }) {
       </div>
 
       {/* Meta */}
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="ml-auto flex items-center gap-2 max-sm:w-full max-sm:justify-between">
         {game.last_played_at && (
           <span className="text-[9px] text-muted-foreground">
             {formatRelativeTime(game.last_played_at)}

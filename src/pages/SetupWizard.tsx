@@ -114,6 +114,7 @@ export default function SetupWizard() {
           is_custom: false,
           is_detected: true,
           is_favorite: false,
+          auto_backup_disabled: false,
           play_count: 0,
           total_playtime_seconds: 0,
           last_played_at: null,

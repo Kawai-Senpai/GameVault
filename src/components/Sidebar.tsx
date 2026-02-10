@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useApp } from "@/contexts/app.context";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -43,6 +43,17 @@ export default function Sidebar() {
   const { games, selectedGameId, setSelectedGameId, sidebarCollapsed, setSidebarCollapsed, version } = useApp();
   const [searchQuery, setSearchQuery] = useState("");
 
+  useEffect(() => {
+    const applyAutoCollapse = () => {
+      if (window.innerWidth < 980 && !sidebarCollapsed) {
+        setSidebarCollapsed(true);
+      }
+    };
+    applyAutoCollapse();
+    window.addEventListener("resize", applyAutoCollapse);
+    return () => window.removeEventListener("resize", applyAutoCollapse);
+  }, [sidebarCollapsed, setSidebarCollapsed]);
+
   const navItems: NavItem[] = [
     { path: "/", label: "Library", icon: <Library className="size-3.5" /> },
     { path: "/screenshots", label: "Screenshots", icon: <Camera className="size-3.5" /> },
@@ -71,19 +82,16 @@ export default function Sidebar() {
     <TooltipProvider delayDuration={300}>
       <div
         className={cn(
-          "flex flex-col h-full bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out",
-          sidebarCollapsed ? "w-14" : "w-56"
+          "flex h-full flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300 ease-in-out",
+          sidebarCollapsed ? "w-14" : "w-[clamp(13.25rem,18vw,16.5rem)]"
         )}
       >
         {/* Header */}
-        <div className="flex items-center gap-2 px-3 h-12 border-b border-sidebar-border shrink-0">
-          <div className="size-7 rounded-lg overflow-hidden shrink-0">
-            <img src="/icon-192.png" alt="GameVault" className="w-full h-full object-cover" draggable={false} />
-          </div>
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-sidebar-border px-3">
           {!sidebarCollapsed && (
             <div className="flex flex-col min-w-0">
-              <span className="text-xs font-bold tracking-tight text-sidebar-foreground">
-                GameVault
+              <span className="text-xs font-semibold tracking-tight text-sidebar-foreground">
+                Vault Navigation
               </span>
               <span className="text-[9px] text-muted-foreground">v{version}</span>
             </div>

@@ -113,7 +113,12 @@ pub async fn create_backup(
             // Check existing backups for matching hash
             if let Ok(entries) = fs::read_dir(&game_backup_dir) {
                 for entry in entries.flatten() {
-                    if entry.path().extension().map(|e| e == "zip").unwrap_or(false) {
+                    if entry
+                        .path()
+                        .extension()
+                        .map(|e| e == "zip")
+                        .unwrap_or(false)
+                    {
                         if let Ok(info) = read_backup_metadata(&entry.path()) {
                             if info.content_hash == content_hash {
                                 return Ok(BackupResult {
@@ -124,7 +129,9 @@ pub async fn create_backup(
                                     compressed_size: 0,
                                     content_hash,
                                     skipped_duplicate: true,
-                                    message: "Backup skipped — saves haven't changed since last backup".to_string(),
+                                    message:
+                                        "Backup skipped — saves haven't changed since last backup"
+                                            .to_string(),
                                 });
                             }
                         }
@@ -159,13 +166,11 @@ pub async fn create_backup(
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
     {
-        let rel_path = entry
-            .path()
-            .strip_prefix(&save_dir)
-            .unwrap_or(entry.path());
+        let rel_path = entry.path().strip_prefix(&save_dir).unwrap_or(entry.path());
         let rel_str = rel_path.to_string_lossy().replace('\\', "/");
 
-        zip.start_file(&rel_str, options).map_err(|e| e.to_string())?;
+        zip.start_file(&rel_str, options)
+            .map_err(|e| e.to_string())?;
         let mut f = fs::File::open(entry.path()).map_err(|e| e.to_string())?;
         let mut buffer = Vec::new();
         f.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
@@ -189,14 +194,14 @@ pub async fn create_backup(
     };
 
     let info_json = serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?;
-    zip.start_file("_backup_info.json", options).map_err(|e| e.to_string())?;
-    zip.write_all(info_json.as_bytes()).map_err(|e| e.to_string())?;
+    zip.start_file("_backup_info.json", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(info_json.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     zip.finish().map_err(|e| e.to_string())?;
 
-    let compressed_size = fs::metadata(&zip_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let compressed_size = fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
 
     Ok(BackupResult {
         success: true,
@@ -332,15 +337,23 @@ pub async fn rename_backup(zip_path: String, new_name: String) -> Result<bool, S
         if name == "_backup_info.json" {
             // Update the display name in metadata
             let mut content = String::new();
-            entry.read_to_string(&mut content).map_err(|e| e.to_string())?;
+            entry
+                .read_to_string(&mut content)
+                .map_err(|e| e.to_string())?;
             if let Ok(mut info) = serde_json::from_str::<BackupInfo>(&content) {
                 info.display_name = new_name.clone();
                 let updated = serde_json::to_string_pretty(&info).map_err(|e| e.to_string())?;
-                new_zip.start_file("_backup_info.json", options).map_err(|e| e.to_string())?;
-                new_zip.write_all(updated.as_bytes()).map_err(|e| e.to_string())?;
+                new_zip
+                    .start_file("_backup_info.json", options)
+                    .map_err(|e| e.to_string())?;
+                new_zip
+                    .write_all(updated.as_bytes())
+                    .map_err(|e| e.to_string())?;
             }
         } else {
-            new_zip.start_file(&name, options).map_err(|e| e.to_string())?;
+            new_zip
+                .start_file(&name, options)
+                .map_err(|e| e.to_string())?;
             let mut buffer = Vec::new();
             entry.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
             new_zip.write_all(&buffer).map_err(|e| e.to_string())?;
@@ -428,6 +441,79 @@ fn sanitize_name(name: &str) -> String {
         .to_string()
 }
 
+/// Scan a backup directory for existing backups and return their metadata
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ScannedBackup {
+    pub id: String,
+    pub game_id: String,
+    pub game_name: String,
+    pub display_name: String,
+    pub collection_id: Option<String>,
+    pub source_path: String,
+    pub backup_time: String,
+    pub content_hash: String,
+    pub file_count: usize,
+    pub file_size: u64,
+    pub compressed_size: u64,
+    pub file_path: String,
+}
+
+#[tauri::command]
+pub async fn scan_backup_directory(backup_dir: String) -> Result<Vec<ScannedBackup>, String> {
+    let dir = PathBuf::from(&backup_dir);
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut discovered: Vec<ScannedBackup> = Vec::new();
+
+    // Walk subdirectories (each should be a game folder: <GameName>_<gameId>)
+    let entries = fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+
+        // Walk zip files inside the game folder
+        let game_dir = entry.path();
+        if let Ok(zips) = fs::read_dir(&game_dir) {
+            for zip_entry in zips.flatten() {
+                let zip_path = zip_entry.path();
+                if zip_path
+                    .extension()
+                    .map(|e| e == "zip")
+                    .unwrap_or(false)
+                {
+                    // Try to read _backup_info.json from the zip
+                    if let Ok(info) = read_backup_metadata(&zip_path) {
+                        let compressed_size =
+                            fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
+                        discovered.push(ScannedBackup {
+                            id: info.id,
+                            game_id: info.game_id,
+                            game_name: info.game_name,
+                            display_name: info.display_name,
+                            collection_id: info.collection_id,
+                            source_path: info.source_path,
+                            backup_time: info.backup_time,
+                            content_hash: info.content_hash,
+                            file_count: info.file_count,
+                            file_size: info.total_size,
+                            compressed_size,
+                            file_path: zip_path.to_string_lossy().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by backup time descending
+    discovered.sort_by(|a, b| b.backup_time.cmp(&a.backup_time));
+
+    Ok(discovered)
+}
+
 /// Expand Windows environment variables in a path
 fn expand_env_vars(path: &str) -> String {
     let mut result = path.to_string();
@@ -455,19 +541,15 @@ fn expand_env_vars(path: &str) -> String {
     if result.contains("%STEAM_USERDATA%") {
         // Try to find Steam installation
         if let Ok(program_files) = std::env::var("PROGRAMFILES(X86)") {
-            let steam_userdata = PathBuf::from(&program_files)
-                .join("Steam")
-                .join("userdata");
+            let steam_userdata = PathBuf::from(&program_files).join("Steam").join("userdata");
             if steam_userdata.exists() {
                 // Find the first user directory
                 if let Ok(entries) = fs::read_dir(&steam_userdata) {
                     for entry in entries.flatten() {
                         if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                             let user_dir = entry.path();
-                            result = result.replace(
-                                "%STEAM_USERDATA%",
-                                &user_dir.to_string_lossy(),
-                            );
+                            result =
+                                result.replace("%STEAM_USERDATA%", &user_dir.to_string_lossy());
                             break;
                         }
                     }

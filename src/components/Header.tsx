@@ -26,7 +26,7 @@ export default function Header({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 px-5 h-12 border-b border-border shrink-0",
+        "flex min-h-12 shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-2 sm:px-5",
         className
       )}
     >
@@ -47,9 +47,7 @@ export default function Header({
           </p>
         )}
       </div>
-      {rightContent && (
-        <div className="flex items-center gap-1.5 shrink-0">{rightContent}</div>
-      )}
+      {rightContent && <div className="ml-auto flex items-center gap-1.5 max-sm:w-full">{rightContent}</div>}
     </div>
   );
 }

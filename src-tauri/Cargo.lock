@@ -1217,7 +1217,7 @@ dependencies = [
  "rustc_version",
  "toml 0.9.11+spec-1.1.0",
  "vswhom",
- "winreg",
+ "winreg 0.55.0",
 ]
 
 [[package]]
@@ -1623,6 +1623,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sysinfo 0.33.1",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -1638,6 +1639,7 @@ dependencies = [
  "walkdir",
  "winapi",
  "windows-sys 0.59.0",
+ "winreg 0.52.0",
  "xcap",
  "zip",
 ]
@@ -5361,6 +5363,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysinfo"
+version = "0.33.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fc858248ea01b66f19d8e8a6d55f41deaf91e9d495246fd01368d99935c6c01"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+ "memchr",
+ "ntapi",
+ "rayon",
+ "windows 0.54.0",
+]
+
+[[package]]
 name = "system-configuration"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7335,6 +7351,16 @@ dependencies = [
 
 [[package]]
 name = "winreg"
+version = "0.52.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a277a57398d4bfa075df44f501a17cfdf8542d224f0d36095a2adc7aee4ef0a5"
+dependencies = [
+ "cfg-if",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "winreg"
 version = "0.55.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb5a765337c50e9ec252c2069be9bf91c7df47afb103b642ba3a53bf8101be97"
@@ -7532,7 +7558,7 @@ dependencies = [
  "image",
  "log",
  "percent-encoding",
- "sysinfo",
+ "sysinfo 0.30.13",
  "thiserror 1.0.69",
  "windows 0.54.0",
  "xcb",

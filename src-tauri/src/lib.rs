@@ -1,7 +1,7 @@
 mod backup;
 mod games;
-mod screenshots;
 mod keymapper;
+mod screenshots;
 mod tray;
 
 use tauri::Manager;
@@ -179,12 +179,12 @@ pub fn run() {
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('setup_complete', 'false');
 
                                 -- New settings defaults
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_backup_enabled', 'false');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_backup_enabled', 'true');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_backup_interval_minutes', '30');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('max_backups_per_game', '10');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('compress_backups', 'true');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_backup_complete', 'true');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('launch_on_startup', 'false');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('launch_on_startup', 'true');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('minimize_to_tray', 'true');
 
                                 -- Default shortcuts
@@ -203,6 +203,15 @@ pub fn run() {
                             sql: r#"
                                 UPDATE settings SET value = 'Ctrl+Shift+G' WHERE key = 'overlay_shortcut' AND value = 'Shift+Tab';
                                 UPDATE shortcuts SET keys = 'Ctrl+Shift+G' WHERE id = 's1' AND keys = 'Shift+Tab';
+                            "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                        // Migration 3: Per-game auto-backup toggle
+                        tauri_plugin_sql::Migration {
+                            version: 3,
+                            description: "Add per-game auto-backup disable column",
+                            sql: r#"
+                                ALTER TABLE games ADD COLUMN auto_backup_disabled INTEGER DEFAULT 0;
                             "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
@@ -242,6 +251,7 @@ pub fn run() {
             backup::get_folder_size,
             backup::open_backup_directory,
             backup::open_save_directory,
+            backup::scan_backup_directory,
             // Game commands
             games::detect_installed_games,
             games::expand_env_path,
@@ -251,6 +261,8 @@ pub fn run() {
             games::pick_folder_path,
             games::pick_image_file,
             games::get_app_data_dir,
+            games::list_running_windows,
+            games::get_last_foreground_window,
             // Screenshot commands
             screenshots::capture_screen,
             screenshots::capture_area,
@@ -268,22 +280,64 @@ pub fn run() {
             show_overlay,
             hide_overlay,
             set_overlay_position,
+            set_overlay_height,
+            // Startup behavior
+            set_launch_on_startup,
+            is_launch_on_startup_enabled,
             // General
             get_version,
             check_for_updates,
             open_external_url,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running GameVault");
+        .on_window_event(|window, event| {
+            // Intercept main-window close → hide to tray instead of destroying it
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building GameVault")
+        .run(|_app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+            }
+        });
 }
 
 // ─── Overlay Commands ──────────────────────────────────────────
+
+/// Position the overlay strip at top-center of the primary monitor
+pub fn position_overlay_strip(overlay: &tauri::WebviewWindow<tauri::Wry>) {
+    if let Ok(Some(monitor)) = overlay.primary_monitor() {
+        let monitor_size = monitor.size();
+        let scale = monitor.scale_factor();
+        let strip_width: f64 = 700.0;
+        let strip_height: f64 = 54.0;
+        let x = ((monitor_size.width as f64 / scale) - strip_width) / 2.0;
+        let y: f64 = 0.0; // top of screen
+
+        let _ = overlay.set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: strip_width,
+            height: strip_height,
+        }));
+        let _ = overlay.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+            x,
+            y,
+        }));
+    }
+}
+
 #[tauri::command]
 async fn toggle_overlay(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(overlay) = app.get_webview_window("overlay") {
         if overlay.is_visible().unwrap_or(false) {
             overlay.hide().map_err(|e| e.to_string())?;
         } else {
+            games::cache_foreground_window_snapshot();
+            position_overlay_strip(&overlay);
             overlay.show().map_err(|e| e.to_string())?;
             overlay.set_focus().map_err(|e| e.to_string())?;
         }
@@ -294,6 +348,8 @@ async fn toggle_overlay(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn show_overlay(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(overlay) = app.get_webview_window("overlay") {
+        games::cache_foreground_window_snapshot();
+        position_overlay_strip(&overlay);
         overlay.show().map_err(|e| e.to_string())?;
         overlay.set_focus().map_err(|e| e.to_string())?;
     }
@@ -309,13 +365,28 @@ async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn set_overlay_height(app: tauri::AppHandle, height: f64) -> Result<(), String> {
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let current_size = overlay.outer_size().map_err(|e| e.to_string())?;
+        let scale = overlay
+            .scale_factor()
+            .map_err(|e| e.to_string())?;
+        let current_width = current_size.width as f64 / scale;
+        overlay
+            .set_size(tauri::Size::Logical(tauri::LogicalSize {
+                width: current_width,
+                height,
+            }))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn set_overlay_position(app: tauri::AppHandle, x: f64, y: f64) -> Result<(), String> {
     if let Some(overlay) = app.get_webview_window("overlay") {
         overlay
-            .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-                x: x as i32,
-                y: y as i32,
-            }))
+            .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -358,6 +429,66 @@ async fn open_external_url(url: String) -> Result<(), String> {
     open::that(&url).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn set_launch_on_startup(enabled: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+        use winreg::RegKey;
+
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let run_key = hkcu
+            .open_subkey_with_flags(
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                KEY_SET_VALUE,
+            )
+            .map_err(|e| e.to_string())?;
+        let value_name = "GameVault";
+
+        if enabled {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let value = format!("\"{}\"", exe.to_string_lossy());
+            run_key
+                .set_value(value_name, &value)
+                .map_err(|e| e.to_string())?;
+        } else {
+            let _ = run_key.delete_value(value_name);
+        }
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = enabled;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn is_launch_on_startup_enabled() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
+        use winreg::RegKey;
+
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let run_key = hkcu
+            .open_subkey_with_flags(
+                "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                KEY_READ,
+            )
+            .map_err(|e| e.to_string())?;
+        let value_name = "GameVault";
+        let value: Result<String, _> = run_key.get_value(value_name);
+        return Ok(value.is_ok());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
 // ─── AI Chat Command ───────────────────────────────────────────
 #[derive(serde::Deserialize)]
 #[allow(dead_code)]
@@ -377,7 +508,8 @@ async fn ai_chat(messages: Vec<ChatMsg>) -> Result<String, String> {
         .unwrap_or("")
         .to_lowercase();
 
-    let response = if last.contains("save") && (last.contains("where") || last.contains("location")) {
+    let response = if last.contains("save") && (last.contains("where") || last.contains("location"))
+    {
         "Most PC game saves are found in:\n• %APPDATA% (Roaming)\n• %LOCALAPPDATA%\n• Documents\\My Games\\\n• Steam: steamapps\\common\\<game>\\saves\n\nUse GameVault's auto-detect to find them automatically."
     } else if last.contains("backup") {
         "Backup tips:\n1. Back up before major updates\n2. Use descriptive names for backups\n3. Enable auto-backup in Settings\n4. Test restores periodically\n5. Keep cloud + local copies"

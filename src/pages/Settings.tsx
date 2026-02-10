@@ -7,7 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
@@ -34,13 +36,17 @@ import {
   Globe,
   Eye,
   EyeOff,
+  Search,
+  Download,
 } from "lucide-react";
 import type { AppSettings } from "@/types";
 
 export default function Settings() {
-  const { settings, updateSetting, games } = useApp();
+  const { settings, updateSetting, games, autoBackupStatus } = useApp();
   const { theme, setTheme } = useTheme();
   const [showApiKey, setShowApiKey] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<{ imported: number; skipped: number; total: number } | null>(null);
 
   const handleUpdate = useCallback(
     async (key: keyof AppSettings, value: unknown) => {
@@ -65,9 +71,103 @@ export default function Settings() {
       if (folder) {
         await handleUpdate(field, folder);
         toast.success(`${field === "backup_directory" ? "Backup" : "Screenshots"} directory updated`);
+        // Auto-scan when backup directory is set/changed
+        if (field === "backup_directory") {
+          await scanAndImportBackups(folder);
+        }
       }
     } catch (err) {
       toast.error(`${err}`);
+    }
+  };
+
+  // Scan backup directory and import discovered backups into DB
+  const scanAndImportBackups = async (backupDir: string) => {
+    setIsScanning(true);
+    setScanResult(null);
+    try {
+      interface ScannedBackup {
+        id: string;
+        game_id: string;
+        game_name: string;
+        display_name: string;
+        collection_id: string | null;
+        source_path: string;
+        backup_time: string;
+        content_hash: string;
+        file_count: number;
+        file_size: number;
+        compressed_size: number;
+        file_path: string;
+      }
+
+      const discovered = await invoke<ScannedBackup[]>("scan_backup_directory", { backupDir });
+
+      if (discovered.length === 0) {
+        setScanResult({ imported: 0, skipped: 0, total: 0 });
+        toast.info("No existing backups found in this directory");
+        return;
+      }
+
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+
+      let imported = 0;
+      let skipped = 0;
+
+      for (const backup of discovered) {
+        // Check if backup already exists in DB (by id or file_path)
+        const existing = (await conn.select(
+          "SELECT id FROM backups WHERE id = $1 OR file_path = $2",
+          [backup.id, backup.file_path]
+        )) as Array<{ id: string }>;
+
+        if (existing.length > 0) {
+          skipped += 1;
+          continue;
+        }
+
+        // Check if the game exists in our DB
+        const gameExists = (await conn.select(
+          "SELECT id FROM games WHERE id = $1",
+          [backup.game_id]
+        )) as Array<{ id: string }>;
+
+        if (gameExists.length === 0) {
+          // Game doesn't exist — skip this backup (we can't orphan it)
+          skipped += 1;
+          continue;
+        }
+
+        // Import the backup record
+        await conn.execute(
+          `INSERT INTO backups (id, game_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            backup.id,
+            backup.game_id,
+            backup.display_name || `Imported: ${backup.game_name}`,
+            backup.file_path,
+            backup.file_size,
+            backup.compressed_size,
+            backup.content_hash,
+            backup.source_path,
+            backup.backup_time,
+          ]
+        );
+        imported += 1;
+      }
+
+      setScanResult({ imported, skipped, total: discovered.length });
+      if (imported > 0) {
+        toast.success(`Imported ${imported} backup${imported !== 1 ? "s" : ""} from existing directory`);
+      } else {
+        toast.info(`Found ${discovered.length} backup${discovered.length !== 1 ? "s" : ""}, all already in database`);
+      }
+    } catch (err) {
+      toast.error(`Scan failed: ${err}`);
+    } finally {
+      setIsScanning(false);
     }
   };
 
@@ -281,6 +381,35 @@ export default function Settings() {
                     <FolderOpen className="size-3.5" />
                   </Button>
                 </div>
+                {settings.backup_directory && (
+                  <div className="mt-1.5 space-y-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-[9px] gap-1"
+                      disabled={isScanning}
+                      onClick={() => scanAndImportBackups(settings.backup_directory)}
+                    >
+                      {isScanning ? (
+                        <>
+                          <Search className="size-2.5 animate-pulse" /> Scanning...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="size-2.5" /> Scan &amp; Import Existing Backups
+                        </>
+                      )}
+                    </Button>
+                    {isScanning && (
+                      <Skeleton className="h-3 w-full rounded" />
+                    )}
+                    {scanResult && !isScanning && (
+                      <p className="text-[9px] text-muted-foreground">
+                        Found {scanResult.total} backup{scanResult.total !== 1 ? "s" : ""} — {scanResult.imported} imported, {scanResult.skipped} skipped
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between">
@@ -345,6 +474,32 @@ export default function Settings() {
                   onCheckedChange={(v) => handleUpdate("compress_backups", v)}
                 />
               </div>
+
+              {(autoBackupStatus.running || autoBackupStatus.lastRunAt) && (
+                <div className="space-y-1.5 rounded-lg border border-border/60 bg-muted/25 p-2.5">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="font-medium">Auto-backup status</span>
+                    <span className="text-muted-foreground">
+                      {autoBackupStatus.running
+                        ? `${autoBackupStatus.current}/${autoBackupStatus.total}`
+                        : autoBackupStatus.lastRunAt
+                          ? `Last run ${new Date(autoBackupStatus.lastRunAt).toLocaleTimeString()}`
+                          : "Idle"}
+                    </span>
+                  </div>
+                  {autoBackupStatus.running && (
+                    <Progress
+                      value={
+                        autoBackupStatus.total
+                          ? Math.round((autoBackupStatus.current / autoBackupStatus.total) * 100)
+                          : 0
+                      }
+                      className="h-1"
+                    />
+                  )}
+                  <p className="text-[9px] text-muted-foreground">{autoBackupStatus.message}</p>
+                </div>
+              )}
             </CardContent>
           </Card>
 

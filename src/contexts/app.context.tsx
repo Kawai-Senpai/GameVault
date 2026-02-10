@@ -3,10 +3,22 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import type { Game, AppSettings } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
+import { sendNotification } from "@tauri-apps/plugin-notification";
+import { listen } from "@tauri-apps/api/event";
+import { toast } from "sonner";
+
+export interface AutoBackupStatus {
+  running: boolean;
+  current: number;
+  total: number;
+  message: string;
+  lastRunAt: string | null;
+}
 
 interface AppContextValue {
   // Games
@@ -32,6 +44,9 @@ interface AppContextValue {
 
   // Version
   version: string;
+
+  // Auto backup status
+  autoBackupStatus: AutoBackupStatus;
 }
 
 const defaultSettings: AppSettings = {
@@ -49,12 +64,12 @@ const defaultSettings: AppSettings = {
   screenshot_shortcut: "F12",
   quick_backup_shortcut: "Ctrl+Shift+B",
   setup_complete: false,
-  auto_backup_enabled: false,
+  auto_backup_enabled: true,
   auto_backup_interval_minutes: 30,
   max_backups_per_game: 10,
   compress_backups: true,
   notify_backup_complete: true,
-  launch_on_startup: false,
+  launch_on_startup: true,
   minimize_to_tray: true,
 };
 
@@ -84,6 +99,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [setupComplete, setSetupComplete] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [version, setVersion] = useState("2.0.0");
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [autoBackupStatus, setAutoBackupStatus] = useState<AutoBackupStatus>({
+    running: false,
+    current: 0,
+    total: 0,
+    message: "Idle",
+    lastRunAt: null,
+  });
+  const autoBackupLock = useRef(false);
+  const lastAutoBackupRunAt = useRef<number>(0);
 
   const selectedGame = games.find((g) => g.id === selectedGameId) || null;
 
@@ -129,8 +154,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         setSettings(loaded);
         setSetupComplete(loaded.setup_complete);
+        setSettingsLoaded(true);
       } catch (err) {
         console.error("Failed to load settings:", err);
+        setSettingsLoaded(true);
       }
     };
     loadSettings();
@@ -164,6 +191,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           is_custom: Boolean(r.is_custom),
           is_detected: Boolean(r.is_detected),
           is_favorite: Boolean(r.is_favorite),
+          auto_backup_disabled: Boolean(r.auto_backup_disabled),
           play_count: (r.play_count as number) || 0,
           total_playtime_seconds: (r.total_playtime_seconds as number) || 0,
           last_played_at: r.last_played_at as string | null,
@@ -181,6 +209,358 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     loadGames();
   }, []);
 
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    invoke("set_launch_on_startup", { enabled: settings.launch_on_startup }).catch(() => {
+      // Unsupported platform or unavailable permission.
+    });
+  }, [settings.launch_on_startup, settingsLoaded]);
+
+  // Auto-scan backup directory on startup to reconcile on-disk backups with DB
+  useEffect(() => {
+    if (!settingsLoaded || !settings.backup_directory || games.length === 0) return;
+    const reconcileBackups = async () => {
+      try {
+        interface ScannedBackup {
+          id: string;
+          game_id: string;
+          game_name: string;
+          display_name: string;
+          collection_id: string | null;
+          source_path: string;
+          backup_time: string;
+          content_hash: string;
+          file_count: number;
+          file_size: number;
+          compressed_size: number;
+          file_path: string;
+        }
+        const discovered = await invoke<ScannedBackup[]>("scan_backup_directory", {
+          backupDir: settings.backup_directory,
+        });
+        if (discovered.length === 0) return;
+
+        const db = await import("@tauri-apps/plugin-sql");
+        const conn = await db.default.load("sqlite:gamevault.db");
+        let imported = 0;
+
+        for (const backup of discovered) {
+          // Skip if already in DB
+          const existing = (await conn.select(
+            "SELECT id FROM backups WHERE id = $1 OR file_path = $2",
+            [backup.id, backup.file_path]
+          )) as Array<{ id: string }>;
+          if (existing.length > 0) continue;
+
+          // Skip if game not in DB
+          const gameExists = (await conn.select(
+            "SELECT id FROM games WHERE id = $1",
+            [backup.game_id]
+          )) as Array<{ id: string }>;
+          if (gameExists.length === 0) continue;
+
+          await conn.execute(
+            `INSERT INTO backups (id, game_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+              backup.id,
+              backup.game_id,
+              backup.display_name || `Recovered: ${backup.game_name}`,
+              backup.file_path,
+              backup.file_size,
+              backup.compressed_size,
+              backup.content_hash,
+              backup.source_path,
+              backup.backup_time,
+            ]
+          );
+          imported += 1;
+        }
+
+        if (imported > 0) {
+          console.log(`Auto-reconciled ${imported} backup(s) from disk`);
+        }
+      } catch (err) {
+        console.error("Backup reconciliation failed:", err);
+      }
+    };
+    reconcileBackups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded, settings.backup_directory, games.length]);
+
+  const runAutoBackup = useCallback(async () => {
+    if (!settingsLoaded) return;
+    if (!settings.auto_backup_enabled) return;
+    if (!settings.backup_directory) return;
+    if (autoBackupLock.current) return;
+
+    const intervalMs = Math.max(5, settings.auto_backup_interval_minutes) * 60_000;
+    if (Date.now() - lastAutoBackupRunAt.current < intervalMs) return;
+
+    const candidates = games.filter((game) => game.save_paths.length > 0 && !game.auto_backup_disabled);
+    if (!candidates.length) return;
+
+    autoBackupLock.current = true;
+    setAutoBackupStatus({
+      running: true,
+      current: 0,
+      total: candidates.length,
+      message: "Running auto-backup...",
+      lastRunAt: autoBackupStatus.lastRunAt,
+    });
+
+    let created = 0;
+    let skipped = 0;
+    let failed = 0;
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+
+      for (let i = 0; i < candidates.length; i++) {
+        const game = candidates[i];
+        setAutoBackupStatus((prev) => ({
+          ...prev,
+          current: i + 1,
+          message: `Backing up ${game.name}...`,
+        }));
+
+        try {
+          const expanded = await invoke<string>("expand_env_path", {
+            path: game.save_paths[0],
+          });
+          const exists = await invoke<boolean>("check_path_exists", {
+            path: game.save_paths[0],
+          });
+          if (!exists) {
+            skipped += 1;
+            continue;
+          }
+
+          const result = await invoke<{
+            backup_id: string;
+            file_path: string;
+            file_size: number;
+            compressed_size: number;
+            content_hash: string;
+            skipped_duplicate: boolean;
+            message: string;
+          }>("create_backup", {
+            backupDir: settings.backup_directory,
+            gameId: game.id,
+            gameName: game.name,
+            savePath: expanded,
+            displayName: `Auto Backup ${new Date().toLocaleString()}`,
+            collectionId: null,
+            checkDuplicates: true,
+          });
+
+          if (result.skipped_duplicate) {
+            skipped += 1;
+            continue;
+          }
+
+          await conn.execute(
+            `INSERT INTO backups (id, game_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, datetime('now'))`,
+            [
+              result.backup_id,
+              game.id,
+              `Auto Backup ${new Date().toLocaleString()}`,
+              result.file_path,
+              result.file_size,
+              result.compressed_size,
+              result.content_hash,
+              expanded,
+            ]
+          );
+
+          const rows = (await conn.select(
+            "SELECT id, file_path FROM backups WHERE game_id = $1 ORDER BY created_at DESC",
+            [game.id]
+          )) as Array<{ id: string; file_path: string }>;
+          if (rows.length > settings.max_backups_per_game) {
+            const overflow = rows.slice(settings.max_backups_per_game);
+            for (const old of overflow) {
+              try {
+                await invoke("delete_backup", { zipPath: old.file_path });
+              } catch {
+                // Continue pruning metadata even if file is already missing.
+              }
+              await conn.execute("DELETE FROM backups WHERE id = $1", [old.id]);
+            }
+          }
+
+          created += 1;
+        } catch (err) {
+          console.error(`Auto-backup failed for ${game.name}:`, err);
+          failed += 1;
+        }
+      }
+
+      lastAutoBackupRunAt.current = Date.now();
+      const summary = `Auto-backup complete: ${created} new, ${skipped} unchanged, ${failed} failed`;
+      setAutoBackupStatus({
+        running: false,
+        current: candidates.length,
+        total: candidates.length,
+        message: summary,
+        lastRunAt: new Date().toISOString(),
+      });
+      if (settings.notify_backup_complete) {
+        try {
+          sendNotification({
+            title: "Game Vault",
+            body: summary,
+          });
+        } catch {
+          // Notification may be blocked.
+        }
+      }
+    } finally {
+      autoBackupLock.current = false;
+    }
+  }, [
+    autoBackupStatus.lastRunAt,
+    games,
+    settings.auto_backup_enabled,
+    settings.auto_backup_interval_minutes,
+    settings.backup_directory,
+    settings.max_backups_per_game,
+    settings.notify_backup_complete,
+    settingsLoaded,
+  ]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    const timer = window.setInterval(() => {
+      void runAutoBackup();
+    }, 30_000);
+    void runAutoBackup();
+    return () => window.clearInterval(timer);
+  }, [runAutoBackup, settingsLoaded]);
+
+  useEffect(() => {
+    const resolveGame = () => {
+      if (selectedGameId) {
+        const selected = games.find((g) => g.id === selectedGameId);
+        if (selected) return selected;
+      }
+      return games.find((g) => g.save_paths.length > 0) || games[0] || null;
+    };
+
+    const onQuickBackup = async () => {
+      const game = resolveGame();
+      if (!game) return toast.error("No game available for quick backup");
+      if (!settings.backup_directory) return toast.error("Set backup directory in Settings");
+      if (!game.save_paths.length) return toast.error(`No save path configured for ${game.name}`);
+
+      const toastId = toast.loading(`Quick backup: ${game.name}`);
+      try {
+        const expanded = await invoke<string>("expand_env_path", { path: game.save_paths[0] });
+        const result = await invoke<{
+          backup_id: string;
+          file_path: string;
+          file_size: number;
+          compressed_size: number;
+          content_hash: string;
+          skipped_duplicate: boolean;
+          message: string;
+        }>("create_backup", {
+          backupDir: settings.backup_directory,
+          gameId: game.id,
+          gameName: game.name,
+          savePath: expanded,
+          displayName: `Tray Backup ${new Date().toLocaleTimeString()}`,
+          collectionId: null,
+          checkDuplicates: true,
+        });
+
+        if (!result.skipped_duplicate) {
+          const db = await import("@tauri-apps/plugin-sql");
+          const conn = await db.default.load("sqlite:gamevault.db");
+          await conn.execute(
+            `INSERT INTO backups (id, game_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, datetime('now'))`,
+            [
+              result.backup_id,
+              game.id,
+              `Tray Backup ${new Date().toLocaleTimeString()}`,
+              result.file_path,
+              result.file_size,
+              result.compressed_size,
+              result.content_hash,
+              expanded,
+            ]
+          );
+        }
+        toast.success(result.message, { id: toastId });
+      } catch (err) {
+        toast.error(`Quick backup failed: ${err}`, { id: toastId });
+      }
+    };
+
+    const onTakeScreenshot = async () => {
+      const game = resolveGame();
+      if (!game) return toast.error("No game available for screenshot");
+      if (!settings.screenshots_directory) return toast.error("Set screenshots directory in Settings");
+
+      const toastId = toast.loading(`Capturing screenshot: ${game.name}`);
+      try {
+        const base64 = await invoke<string>("capture_screen");
+        const result = await invoke<{
+          id: string;
+          file_path: string;
+          thumbnail_path: string;
+          width: number;
+          height: number;
+          file_size: number;
+        }>("save_screenshot_file", {
+          screenshotsDir: settings.screenshots_directory,
+          gameId: game.id,
+          base64Data: base64,
+        });
+
+        const db = await import("@tauri-apps/plugin-sql");
+        const conn = await db.default.load("sqlite:gamevault.db");
+        await conn.execute(
+          `INSERT INTO screenshots (id, game_id, file_path, thumbnail_path, width, height, file_size, captured_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, datetime('now'))`,
+          [
+            result.id,
+            game.id,
+            result.file_path,
+            result.thumbnail_path,
+            result.width,
+            result.height,
+            result.file_size,
+          ]
+        );
+        toast.success("Screenshot captured", { id: toastId });
+      } catch (err) {
+        toast.error(`Screenshot failed: ${err}`, { id: toastId });
+      }
+    };
+
+    let unlistenBackup: (() => void) | null = null;
+    let unlistenScreenshot: (() => void) | null = null;
+    listen("tray-quick-backup", onQuickBackup).then((fn) => {
+      unlistenBackup = fn;
+    });
+    listen("tray-take-screenshot", onTakeScreenshot).then((fn) => {
+      unlistenScreenshot = fn;
+    });
+
+    return () => {
+      unlistenBackup?.();
+      unlistenScreenshot?.();
+    };
+  }, [
+    games,
+    selectedGameId,
+    settings.backup_directory,
+    settings.screenshots_directory,
+  ]);
+
   const updateSetting = useCallback(
     async (key: string, value: string) => {
       try {
@@ -190,6 +570,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ($1, $2, datetime('now'))",
           [key, value]
         );
+
+        if (key === "launch_on_startup") {
+          try {
+            await invoke("set_launch_on_startup", {
+              enabled: value === "true" || value === "1",
+            });
+          } catch (err) {
+            console.error("Failed to set startup behavior:", err);
+          }
+        }
+
         setSettings((prev) => {
           const updated = { ...prev };
           if (BOOLEAN_KEYS.has(key)) {
@@ -235,6 +626,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         sidebarCollapsed,
         setSidebarCollapsed,
         version,
+        autoBackupStatus,
       }}
     >
       {children}

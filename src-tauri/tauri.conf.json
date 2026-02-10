@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "GameVault",
+  "productName": "Game Vault",
   "version": "2.0.0",
   "identifier": "com.ranitbhowmick.gamevault",
   "build": {
@@ -13,11 +13,11 @@
     "windows": [
       {
         "label": "main",
-        "title": "GameVault",
+        "title": "Game Vault",
         "width": 1200,
         "height": 800,
-        "minWidth": 900,
-        "minHeight": 600,
+        "minWidth": 760,
+        "minHeight": 520,
         "decorations": false,
         "transparent": false,
         "resizable": true,
@@ -27,10 +27,10 @@
       },
       {
         "label": "overlay",
-        "title": "GameVault Overlay",
-        "url": "/overlay",
-        "width": 420,
-        "height": 600,
+        "title": "Game Vault Overlay",
+        "url": "/?window=overlay",
+        "width": 700,
+        "height": 54,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

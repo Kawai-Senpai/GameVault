@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -33,8 +34,10 @@ export default function AddGame() {
   const [activeTab, setActiveTab] = useState("detect");
   const [detectedGames, setDetectedGames] = useState<DetectedGame[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [detectProgress, setDetectProgress] = useState(0);
   const [selectedDetected, setSelectedDetected] = useState<Set<string>>(new Set());
   const [isAdding, setIsAdding] = useState(false);
+  const [addProgress, setAddProgress] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
 
   // Custom game form
@@ -53,6 +56,10 @@ export default function AddGame() {
 
   const handleDetect = useCallback(async () => {
     setIsDetecting(true);
+    setDetectProgress(12);
+    const detectTimer = window.setInterval(() => {
+      setDetectProgress((prev) => Math.min(prev + 7, 90));
+    }, 100);
     try {
       const result = await invoke<DetectedGame[]>("detect_installed_games", {
         gamesJson: JSON.stringify(gamesDatabase),
@@ -64,6 +71,9 @@ export default function AddGame() {
       console.error("Detection failed:", err);
       toast.error(`Detection failed: ${err}`);
     } finally {
+      window.clearInterval(detectTimer);
+      setDetectProgress(100);
+      window.setTimeout(() => setDetectProgress(0), 350);
       setIsDetecting(false);
     }
   }, [existingGameIds]);
@@ -95,8 +105,11 @@ export default function AddGame() {
 
       const toAdd = detectedGames.filter((g) => selectedDetected.has(g.id));
       const newGames: import("@/types").Game[] = [];
+      const total = Math.max(1, toAdd.length);
+      setAddProgress(0);
 
-      for (const game of toAdd) {
+      for (let i = 0; i < toAdd.length; i++) {
+        const game = toAdd[i];
         await conn.execute(
           `INSERT OR IGNORE INTO games (id, name, developer, steam_appid, cover_url, header_url, save_paths, extensions, notes, is_detected, added_at, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, datetime('now'), datetime('now'))`,
@@ -129,12 +142,14 @@ export default function AddGame() {
           is_custom: false,
           is_detected: true,
           is_favorite: false,
+          auto_backup_disabled: false,
           play_count: 0,
           total_playtime_seconds: 0,
           last_played_at: null,
           added_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });
+        setAddProgress(Math.round(((i + 1) / total) * 100));
       }
 
       setGames((prev) => [...prev, ...newGames]);
@@ -144,6 +159,7 @@ export default function AddGame() {
       toast.error(`Failed to add games: ${err}`);
     } finally {
       setIsAdding(false);
+      window.setTimeout(() => setAddProgress(0), 350);
     }
   };
 
@@ -154,6 +170,7 @@ export default function AddGame() {
     }
 
     setIsAdding(true);
+    setAddProgress(15);
     try {
       const db = await import("@tauri-apps/plugin-sql");
       const conn = await db.default.load("sqlite:gamevault.db");
@@ -178,6 +195,7 @@ export default function AddGame() {
          VALUES ($1, $2, $3, $4, '[]', $5, $6, 1, datetime('now'), datetime('now'))`,
         [id, customName.trim(), customDeveloper.trim(), JSON.stringify(savePaths), customNotes.trim(), customExePath || null]
       );
+      setAddProgress(70);
 
       const newGame = {
         id,
@@ -195,6 +213,7 @@ export default function AddGame() {
         is_custom: true,
         is_detected: false,
         is_favorite: false,
+        auto_backup_disabled: false,
         play_count: 0,
         total_playtime_seconds: 0,
         last_played_at: null,
@@ -203,12 +222,14 @@ export default function AddGame() {
       };
 
       setGames((prev) => [...prev, newGame]);
+      setAddProgress(100);
       toast.success(`${customName.trim()} added to your library`);
       navigate(`/game/${id}`);
     } catch (err) {
       toast.error(`Failed to add game: ${err}`);
     } finally {
       setIsAdding(false);
+      window.setTimeout(() => setAddProgress(0), 350);
     }
   };
 
@@ -320,6 +341,11 @@ export default function AddGame() {
               </>
             )}
           </div>
+          {(isDetecting || detectProgress > 0 || isAdding || addProgress > 0) && (
+            <div className="border-b border-border/60 px-5 py-1">
+              <Progress value={isAdding ? addProgress : detectProgress} className="h-1" />
+            </div>
+          )}
 
           <ScrollArea className="flex-1">
             <div className="p-5 space-y-2">
