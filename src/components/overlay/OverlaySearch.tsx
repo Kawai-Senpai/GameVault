@@ -28,7 +28,7 @@ const ENGINES: Record<string, { name: string; url: (q: string) => string; icon: 
   },
   duckduckgo: {
     name: "DuckDuckGo",
-    url: (q) => `https://duckduckgo.com/?q=${encodeURIComponent(q)}`,
+    url: (q) => `https://duckduckgo.com/?q=${encodeURIComponent(q)}&kae=d&k7=%23293038&kj=%23181a1f&k9=%2371d4a0&kx=%236c8cff&k8=%23e0e0e0&kaa=%239ecfff`,
     icon: "D",
   },
   bing: {
@@ -209,6 +209,13 @@ export default function OverlaySearch({ defaultSearchEngine, onSearchEngineChang
             ref={iframeRef}
             src={currentUrl}
             className="w-full h-full border-0 rounded-b-lg"
+            style={{
+              transform: 'scale(0.92)',
+              transformOrigin: 'top left',
+              width: 'calc(100% / 0.92)',
+              height: 'calc(100% / 0.92)',
+              filter: 'brightness(0.82) contrast(1.08)',
+            }}
             sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
             title="Web Search"
           />

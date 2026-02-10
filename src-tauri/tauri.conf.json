@@ -42,7 +42,15 @@
         "shadow": false
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": ["**"]
+        }
+      }
+    }
   },
   "bundle": {
     "active": true,

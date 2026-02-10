@@ -9,11 +9,15 @@ import {
   AlertTriangle,
   Archive,
   Camera,
+  CheckCircle2,
   ChevronDown,
+  FolderInput,
   FolderOpen,
   Gamepad2,
   Globe,
+  Info,
   Keyboard,
+  Loader2,
   MessageSquareText,
   RotateCcw,
   Search,
@@ -55,7 +59,7 @@ type OverlayTab = "ops" | "notes" | "macros" | "ai" | "search" | "arcade";
 /* ─── Component ────────────────────────────────────────────── */
 
 export default function Overlay() {
-  const { games, settings, setGames } = useApp();
+  const { games, settings, setGames, updateSetting } = useApp();
 
   const [expanded, setExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<OverlayTab>("ops");
@@ -66,6 +70,20 @@ export default function Overlay() {
   const [quickInput, setQuickInput] = useState("");
   const [statusText, setStatusText] = useState("");
   const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const [screenshotBusy, setScreenshotBusy] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [overlayWizard, setOverlayWizard] = useState<null | "game" | "screenshot-dir" | "backup-dir" | "save-paths">(null);
+  const [successCard, setSuccessCard] = useState<{ action: string; info: string } | null>(null);
+
+  // Make body/html transparent for overlay window (rounded corners)
+  useEffect(() => {
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+    return () => {
+      document.documentElement.style.background = "";
+      document.body.style.background = "";
+    };
+  }, []);
 
   const selectedGame = games.find((g) => g.id === selectedGameId) || null;
   const selectedWindow = runningWindows.find((w) => windowKey(w) === selectedWindowKey) || null;
@@ -244,13 +262,51 @@ export default function Overlay() {
     setTimeout(() => setStatusText(""), 3000);
   };
 
+  const showWizard = useCallback(
+    (wiz: "game" | "screenshot-dir" | "backup-dir" | "save-paths") => {
+      setOverlayWizard(wiz);
+      setActiveTab("ops");
+      if (!expanded) {
+        setExpanded(true);
+        invoke("set_overlay_height", { height: EXPANDED_HEIGHT }).catch(() => {});
+      }
+    },
+    [expanded]
+  );
+
+  const showSuccess = (action: string, info: string) => {
+    setSuccessCard({ action, info });
+    setTimeout(() => setSuccessCard(null), 3500);
+  };
+
   const handleScreenshot = async () => {
+    setOverlayWizard(null);
+    setSuccessCard(null);
     const game = await ensureGame();
-    if (!game) return;
-    if (!settings.screenshots_directory) return toast.error("Set screenshots directory in Settings first");
+    if (!game) {
+      if (!selectedGame && !matchedGame && !selectedWindow) {
+        showWizard("game");
+      }
+      return;
+    }
+    if (!settings.screenshots_directory) {
+      showWizard("screenshot-dir");
+      return;
+    }
+    setScreenshotBusy(true);
     showStatus("Capturing...");
     try {
+      // Hide overlay so it doesn't appear in the screenshot
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const overlayWin = getCurrentWindow();
+      await overlayWin.hide();
+      await new Promise((r) => setTimeout(r, 250)); // wait for window to fully hide
+
       const base64 = await invoke<string>("capture_screen");
+
+      // Restore overlay immediately
+      await overlayWin.show();
+
       const result = await invoke<{
         id: string;
         file_path: string;
@@ -269,19 +325,41 @@ export default function Overlay() {
         `INSERT INTO screenshots (id, game_id, file_path, thumbnail_path, width, height, file_size, captured_at) VALUES ($1, $2, $3, $4, $5, $6, $7, datetime('now'))`,
         [result.id, game.id, result.file_path, result.thumbnail_path, result.width, result.height, result.file_size]
       );
-      showStatus(`Screenshot saved (${formatBytes(result.file_size)})`);
+      showStatus(`Screenshot saved`);
+      showSuccess("screenshot", `${result.width}×${result.height} · ${formatBytes(result.file_size)}`);
       toast.success("Screenshot captured and saved");
     } catch (err) {
+      // Ensure overlay is visible again on error
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        await getCurrentWindow().show();
+      } catch { /* ignore */ }
       showStatus("Failed");
-      toast.error(`${err}`);
+      toast.error(`Screenshot failed: ${err}`);
+    } finally {
+      setScreenshotBusy(false);
     }
   };
 
   const handleQuickBackup = async () => {
+    setOverlayWizard(null);
+    setSuccessCard(null);
     const game = await ensureGame();
-    if (!game) return;
-    if (!settings.backup_directory) return toast.error("Set backup directory in Settings first");
-    if (!game.save_paths.length) return toast.error("No save path configured for this game");
+    if (!game) {
+      if (!selectedGame && !matchedGame && !selectedWindow) {
+        showWizard("game");
+      }
+      return;
+    }
+    if (!settings.backup_directory) {
+      showWizard("backup-dir");
+      return;
+    }
+    if (!game.save_paths.length) {
+      showWizard("save-paths");
+      return;
+    }
+    setBackupBusy(true);
     showStatus("Backing up...");
     try {
       const savePath = await invoke<string>("expand_env_path", { path: game.save_paths[0] });
@@ -311,6 +389,12 @@ export default function Overlay() {
         );
       }
       showStatus(result.skipped_duplicate ? "No changes" : "Backup done");
+      showSuccess(
+        "backup",
+        result.skipped_duplicate
+          ? "No changes since last backup"
+          : `${formatBytes(result.compressed_size)} saved`
+      );
       toast.success(result.message);
       setLastBackup({
         id: result.backup_id,
@@ -327,14 +411,20 @@ export default function Overlay() {
       });
     } catch (err) {
       showStatus("Failed");
-      toast.error(`${err}`);
+      toast.error(`Backup failed: ${err}`);
+    } finally {
+      setBackupBusy(false);
     }
   };
 
   const handleRestore = async () => {
     const game = await ensureGame();
     if (!game || !lastBackup) return;
-    if (!game.save_paths.length) return toast.error("No save path configured");
+    if (!game.save_paths.length) {
+      showWizard("save-paths");
+      setRestoreConfirm(false);
+      return;
+    }
     showStatus("Restoring...");
     try {
       const savePath = await invoke<string>("expand_env_path", { path: game.save_paths[0] });
@@ -348,16 +438,24 @@ export default function Overlay() {
       });
       showStatus("Restored");
       setRestoreConfirm(false);
+      showSuccess("restore", "Save files restored successfully");
       toast.success(result.message);
     } catch (err) {
       showStatus("Failed");
-      toast.error(`${err}`);
+      toast.error(`Restore failed: ${err}`);
     }
   };
 
   const handleOpenSaves = async () => {
     const game = await ensureGame();
-    if (!game || !game.save_paths.length) return;
+    if (!game) {
+      if (!selectedGame && !matchedGame && !selectedWindow) showWizard("game");
+      return;
+    }
+    if (!game.save_paths.length) {
+      showWizard("save-paths");
+      return;
+    }
     try {
       await invoke("open_save_directory", { path: game.save_paths[0] });
     } catch (err) {
@@ -443,8 +541,12 @@ export default function Overlay() {
           title="Open Game Vault"
         >
           <p className="text-[9px] font-semibold truncate leading-none">{gameLabel}</p>
-          {statusText ? (
-            <p className="text-[7px] text-emerald-400 truncate">{statusText}</p>
+          {successCard ? (
+            <p className="text-[7px] text-emerald-400 truncate flex items-center gap-0.5">
+              <CheckCircle2 className="size-2 shrink-0" /> {successCard.info}
+            </p>
+          ) : statusText ? (
+            <p className={cn("text-[7px] truncate", statusText.includes("...") ? "text-sky-400 animate-pulse" : "text-emerald-400")}>{statusText}</p>
           ) : selectedGame && lastBackup ? (
             <p className="text-[7px] text-white/45 truncate">
               {formatRelativeTime(lastBackup.created_at)}
@@ -463,8 +565,8 @@ export default function Overlay() {
           className="flex items-center gap-0.5 shrink-0"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
-          <StripBtn icon={<Camera className="size-3" />} title="Screenshot" onClick={handleScreenshot} />
-          <StripBtn icon={<Archive className="size-3" />} title="Backup" onClick={handleQuickBackup} />
+          <StripBtn icon={<Camera className="size-3" />} title="Screenshot" onClick={handleScreenshot} loading={screenshotBusy} />
+          <StripBtn icon={<Archive className="size-3" />} title="Backup" onClick={handleQuickBackup} loading={backupBusy} />
           <StripBtn
             icon={<RotateCcw className="size-3" />}
             title="Restore"
@@ -573,6 +675,13 @@ export default function Overlay() {
               handleRestore={() => setRestoreConfirm(true)}
               handleOpenSaves={handleOpenSaves}
               settings={settings}
+              updateSetting={updateSetting}
+              screenshotBusy={screenshotBusy}
+              backupBusy={backupBusy}
+              overlayWizard={overlayWizard}
+              setOverlayWizard={setOverlayWizard}
+              successCard={successCard}
+              setGames={setGames}
             />
           )}
           {activeTab === "notes" && (
@@ -616,6 +725,13 @@ function OpsPanel({
   handleRestore,
   handleOpenSaves,
   settings,
+  updateSetting,
+  screenshotBusy,
+  backupBusy,
+  overlayWizard,
+  setOverlayWizard,
+  successCard,
+  setGames,
 }: {
   games: Game[];
   selectedGameId: string | null;
@@ -631,7 +747,14 @@ function OpsPanel({
   handleQuickBackup: () => void;
   handleRestore: () => void;
   handleOpenSaves: () => void;
-  settings: { overlay_shortcut: string; screenshot_shortcut: string; quick_backup_shortcut: string };
+  settings: { overlay_shortcut: string; screenshot_shortcut: string; quick_backup_shortcut: string; backup_directory: string; screenshots_directory: string };
+  updateSetting: (key: string, value: string) => Promise<void>;
+  screenshotBusy: boolean;
+  backupBusy: boolean;
+  overlayWizard: null | "game" | "screenshot-dir" | "backup-dir" | "save-paths";
+  setOverlayWizard: (wiz: null | "game" | "screenshot-dir" | "backup-dir" | "save-paths") => void;
+  successCard: { action: string; info: string } | null;
+  setGames: React.Dispatch<React.SetStateAction<Game[]>>;
 }) {
   const [gameSearch, setGameSearch] = useState("");
   const [windowSearch, setWindowSearch] = useState("");
@@ -819,10 +942,35 @@ function OpsPanel({
       {/* Right: Actions or guidance */}
       <ScrollArea className="flex-1">
         <div className="p-3">
-          {!hasGame ? (
+          {/* Success Card */}
+          {successCard && (
+            <div className="mb-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="size-8 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="size-4 text-emerald-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold text-emerald-300 capitalize">{successCard.action} Complete</p>
+                <p className="text-[8px] text-emerald-400/70">{successCard.info}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Inline Wizard */}
+          {overlayWizard && (
+            <InlineWizard
+              wizard={overlayWizard}
+              onClose={() => setOverlayWizard(null)}
+              updateSetting={updateSetting}
+              selectedGame={selectedGame}
+              selectedGameId={selectedGameId}
+              setGames={setGames}
+            />
+          )}
+
+          {!overlayWizard && !hasGame ? (
             /* No game guidance */
             <NoGameGuide />
-          ) : (
+          ) : !overlayWizard ? (
             <>
               <p className="text-[10px] font-medium mb-2">Quick Actions</p>
               <div className="grid grid-cols-2 gap-2">
@@ -831,12 +979,14 @@ function OpsPanel({
                   label="Take Screenshot"
                   desc="Capture current screen"
                   onClick={handleScreenshot}
+                  loading={screenshotBusy}
                 />
                 <ActionTile
                   icon={<Archive className="size-5 text-emerald-400" />}
                   label="Quick Backup"
                   desc="Backup current game saves"
                   onClick={handleQuickBackup}
+                  loading={backupBusy}
                 />
                 <ActionTile
                   icon={<RotateCcw className="size-5 text-amber-400" />}
@@ -863,12 +1013,252 @@ function OpsPanel({
                   </p>
                 </div>
               )}
+
+              {/* Config status hints */}
+              {selectedGame && (
+                <div className="mt-3 space-y-0.5">
+                  {!settings.screenshots_directory && (
+                    <button
+                      className="w-full flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-left hover:bg-amber-500/10 transition-colors cursor-pointer"
+                      onClick={() => setOverlayWizard("screenshot-dir")}
+                    >
+                      <Info className="size-3 text-amber-400 shrink-0" />
+                      <p className="text-[8px] text-amber-300/80">Set screenshots directory to enable captures</p>
+                    </button>
+                  )}
+                  {!settings.backup_directory && (
+                    <button
+                      className="w-full flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-left hover:bg-amber-500/10 transition-colors cursor-pointer"
+                      onClick={() => setOverlayWizard("backup-dir")}
+                    >
+                      <Info className="size-3 text-amber-400 shrink-0" />
+                      <p className="text-[8px] text-amber-300/80">Set backup directory to enable quick backups</p>
+                    </button>
+                  )}
+                  {selectedGame.save_paths.length === 0 && (
+                    <button
+                      className="w-full flex items-center gap-1.5 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-left hover:bg-amber-500/10 transition-colors cursor-pointer"
+                      onClick={() => setOverlayWizard("save-paths")}
+                    >
+                      <Info className="size-3 text-amber-400 shrink-0" />
+                      <p className="text-[8px] text-amber-300/80">Configure save path for backups & restores</p>
+                    </button>
+                  )}
+                </div>
+              )}
             </>
-          )}
+          ) : null}
         </div>
       </ScrollArea>
     </div>
   );
+}
+
+/* ─── Inline Setup Wizard ──────────────────────────────────── */
+
+function InlineWizard({
+  wizard,
+  onClose,
+  updateSetting,
+  selectedGame,
+  selectedGameId,
+  setGames,
+}: {
+  wizard: "game" | "screenshot-dir" | "backup-dir" | "save-paths";
+  onClose: () => void;
+  updateSetting: (key: string, value: string) => Promise<void>;
+  selectedGame: Game | null;
+  selectedGameId: string | null;
+  setGames: React.Dispatch<React.SetStateAction<Game[]>>;
+}) {
+  const [picking, setPicking] = useState(false);
+  const [savePathInput, setSavePathInput] = useState("");
+
+  const pickDirectory = async (settingKey: string) => {
+    setPicking(true);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const dir = await open({ directory: true, title: wizard === "screenshot-dir" ? "Select Screenshots Folder" : "Select Backup Folder" });
+      if (dir) {
+        await updateSetting(settingKey, dir as string);
+        toast.success("Directory configured!");
+        onClose();
+      }
+    } catch (err) {
+      toast.error(`Failed to pick directory: ${err}`);
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  const handleSavePath = async () => {
+    if (!savePathInput.trim() || !selectedGameId) return;
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      const path = savePathInput.trim();
+      // Get current save_paths, append the new one
+      const current = selectedGame?.save_paths || [];
+      const updated = [...current, path];
+      await conn.execute("UPDATE games SET save_paths = $1, updated_at = datetime('now') WHERE id = $2", [
+        JSON.stringify(updated),
+        selectedGameId,
+      ]);
+      setGames((prev) =>
+        prev.map((g) => (g.id === selectedGameId ? { ...g, save_paths: updated } : g))
+      );
+      toast.success("Save path configured!");
+      onClose();
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  };
+
+  const pickSavePath = async () => {
+    setPicking(true);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const dir = await open({ directory: true, title: "Select Save Files Location" });
+      if (dir) setSavePathInput(dir as string);
+    } catch (err) {
+      toast.error(`${err}`);
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  if (wizard === "game") {
+    return (
+      <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 text-center animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="size-10 rounded-full bg-sky-500/15 flex items-center justify-center mx-auto mb-2.5">
+          <Gamepad2 className="size-5 text-sky-400" />
+        </div>
+        <p className="text-[11px] font-semibold text-white mb-1">Select a Game First</p>
+        <p className="text-[8px] text-white/50 leading-relaxed mb-3 max-w-52 mx-auto">
+          Use the game dropdown on the left panel to pick a game, or launch a game and it will be auto-detected.
+        </p>
+        <div className="flex items-center gap-1.5 justify-center text-[7px] text-white/30">
+          <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">← Select from dropdown</span>
+          <span>or</span>
+          <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10">Launch a game</span>
+        </div>
+        <button
+          className="mt-3 text-[8px] text-white/40 hover:text-white/60 transition-colors"
+          onClick={onClose}
+        >
+          Dismiss
+        </button>
+      </div>
+    );
+  }
+
+  if (wizard === "screenshot-dir") {
+    return (
+      <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-4 animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="flex items-center gap-2.5 mb-3">
+          <div className="size-9 rounded-full bg-sky-500/15 flex items-center justify-center shrink-0">
+            <Camera className="size-4 text-sky-400" />
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold text-white">Configure Screenshots</p>
+            <p className="text-[8px] text-white/40">Choose where to save screenshot captures</p>
+          </div>
+        </div>
+        <button
+          className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20 px-3 py-2 text-[9px] font-medium text-sky-300 transition-colors disabled:opacity-50"
+          onClick={() => pickDirectory("screenshots_directory")}
+          disabled={picking}
+        >
+          {picking ? <Loader2 className="size-3 animate-spin" /> : <FolderInput className="size-3" />}
+          {picking ? "Selecting..." : "Choose Folder"}
+        </button>
+        <button
+          className="mt-2 w-full text-[8px] text-white/30 hover:text-white/50 transition-colors"
+          onClick={onClose}
+        >
+          Skip for now
+        </button>
+      </div>
+    );
+  }
+
+  if (wizard === "backup-dir") {
+    return (
+      <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="flex items-center gap-2.5 mb-3">
+          <div className="size-9 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
+            <Archive className="size-4 text-emerald-400" />
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold text-white">Configure Backups</p>
+            <p className="text-[8px] text-white/40">Choose where to store game save backups</p>
+          </div>
+        </div>
+        <button
+          className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-2 text-[9px] font-medium text-emerald-300 transition-colors disabled:opacity-50"
+          onClick={() => pickDirectory("backup_directory")}
+          disabled={picking}
+        >
+          {picking ? <Loader2 className="size-3 animate-spin" /> : <FolderInput className="size-3" />}
+          {picking ? "Selecting..." : "Choose Folder"}
+        </button>
+        <button
+          className="mt-2 w-full text-[8px] text-white/30 hover:text-white/50 transition-colors"
+          onClick={onClose}
+        >
+          Skip for now
+        </button>
+      </div>
+    );
+  }
+
+  if (wizard === "save-paths") {
+    return (
+      <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="flex items-center gap-2.5 mb-3">
+          <div className="size-9 rounded-full bg-violet-500/15 flex items-center justify-center shrink-0">
+            <FolderOpen className="size-4 text-violet-400" />
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold text-white">Configure Save Path</p>
+            <p className="text-[8px] text-white/40">
+              Set the save file location for {selectedGame?.name || "this game"}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 mb-2">
+          <input
+            value={savePathInput}
+            onChange={(e) => setSavePathInput(e.target.value)}
+            placeholder="C:\Users\...\SaveGames"
+            className="flex-1 h-7 px-2 text-[9px] bg-white/5 border border-white/10 rounded-md text-white placeholder:text-white/25 outline-none focus:border-violet-500/40 transition-colors select-text"
+          />
+          <button
+            className="h-7 px-2 rounded-md border border-white/10 bg-white/5 text-[8px] text-white/50 hover:text-white hover:border-white/20 transition-colors disabled:opacity-50 shrink-0"
+            onClick={pickSavePath}
+            disabled={picking}
+          >
+            {picking ? <Loader2 className="size-3 animate-spin" /> : "Browse"}
+          </button>
+        </div>
+        <button
+          className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 px-3 py-1.5 text-[9px] font-medium text-violet-300 transition-colors disabled:opacity-50"
+          onClick={handleSavePath}
+          disabled={!savePathInput.trim()}
+        >
+          <CheckCircle2 className="size-3" /> Save Path
+        </button>
+        <button
+          className="mt-2 w-full text-[8px] text-white/30 hover:text-white/50 transition-colors"
+          onClick={onClose}
+        >
+          Skip for now
+        </button>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 /* ─── No Game Guidance Component ───────────────────────────── */
@@ -915,24 +1305,26 @@ function StripBtn({
   title,
   onClick,
   disabled = false,
+  loading = false,
 }: {
   icon: React.ReactNode;
   title: string;
   onClick: () => void;
   disabled?: boolean;
+  loading?: boolean;
 }) {
   return (
     <button
       className={cn(
         "size-7 flex items-center justify-center rounded-md transition-all",
-        disabled
+        disabled || loading
           ? "opacity-25 cursor-not-allowed"
           : "text-white/50 hover:text-white hover:bg-white/10 active:scale-95"
       )}
-      onClick={disabled ? undefined : () => void onClick()}
+      onClick={disabled || loading ? undefined : () => void onClick()}
       title={title}
     >
-      {icon}
+      {loading ? <Loader2 className="size-3 animate-spin" /> : icon}
     </button>
   );
 }
@@ -943,27 +1335,31 @@ function ActionTile({
   desc,
   onClick,
   disabled = false,
+  loading = false,
 }: {
   icon: React.ReactNode;
   label: string;
   desc: string;
   onClick: () => void;
   disabled?: boolean;
+  loading?: boolean;
 }) {
   return (
     <button
       className={cn(
         "flex items-start gap-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] p-2.5 text-left transition-all",
-        disabled
+        disabled || loading
           ? "opacity-30 cursor-not-allowed"
           : "hover:bg-white/[0.08] active:scale-[0.98]"
       )}
-      onClick={disabled ? undefined : () => void onClick()}
+      onClick={disabled || loading ? undefined : () => void onClick()}
     >
-      <div className="shrink-0 mt-0.5">{icon}</div>
+      <div className="shrink-0 mt-0.5">
+        {loading ? <Loader2 className="size-5 text-white/50 animate-spin" /> : icon}
+      </div>
       <div className="min-w-0">
-        <p className="text-[9px] font-semibold">{label}</p>
-        <p className="text-[7px] text-white/40">{desc}</p>
+        <p className="text-[9px] font-semibold">{loading ? `${label}...` : label}</p>
+        <p className="text-[7px] text-white/40">{loading ? "Please wait..." : desc}</p>
       </div>
     </button>
   );

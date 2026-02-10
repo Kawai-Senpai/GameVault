@@ -3,10 +3,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /* ════════════════════════════════════════════════════════════
-   Arcade overlay — two mini-games: Tic Tac Toe + Snake
+   Arcade overlay — mini-games: Tic Tac Toe, Snake, Flappy Bird
    ════════════════════════════════════════════════════════════ */
 
-type ArcadeGame = "ttt" | "snake";
+type ArcadeGame = "ttt" | "snake" | "flappy";
 
 export default function OverlayArcade() {
   const [game, setGame] = useState<ArcadeGame>("ttt");
@@ -33,11 +33,20 @@ export default function OverlayArcade() {
         >
           Snake
         </button>
+        <button
+          className={cn(
+            "px-3 py-1 rounded-md text-[9px] font-medium transition-all",
+            game === "flappy" ? "bg-white/10 text-white" : "text-white/40 hover:text-white/60"
+          )}
+          onClick={() => setGame("flappy")}
+        >
+          Flappy Bird
+        </button>
       </div>
 
       {/* Game area */}
       <div className="flex-1 overflow-hidden">
-        {game === "ttt" ? <TicTacToeGame /> : <SnakeGame />}
+        {game === "ttt" ? <TicTacToeGame /> : game === "snake" ? <SnakeGame /> : <FlappyBirdGame />}
       </div>
     </div>
   );
@@ -189,8 +198,11 @@ function SnakeGame() {
   const spawnFood = useCallback((snake: Pos[]): Pos => {
     const occupied = new Set(snake.map((p) => `${p.x},${p.y}`));
     let pos: Pos;
+    let attempts = 0;
     do {
       pos = { x: Math.floor(Math.random() * GRID), y: Math.floor(Math.random() * GRID) };
+      attempts++;
+      if (attempts > 500) break; // safety valve
     } while (occupied.has(`${pos.x},${pos.y}`));
     return pos;
   }, []);
@@ -202,8 +214,10 @@ function SnakeGame() {
     if (!ctx) return;
     const s = stateRef.current;
 
-    // Background
-    ctx.fillStyle = "rgba(255,255,255,0.02)";
+    // Clear canvas completely to prevent frame stacking
+    ctx.clearRect(0, 0, BOARD_PX, BOARD_PX);
+    // Opaque dark background for visibility
+    ctx.fillStyle = "#0a0a0f";
     ctx.fillRect(0, 0, BOARD_PX, BOARD_PX);
 
     // Grid dots
@@ -214,23 +228,27 @@ function SnakeGame() {
       }
     }
 
-    // Food
+    // Food — draw with glow ring for visibility
+    ctx.save();
+    const fx = s.food.x * CELL_PX + CELL_PX / 2;
+    const fy = s.food.y * CELL_PX + CELL_PX / 2;
+    // Outer glow
+    ctx.fillStyle = "rgba(248,113,113,0.15)";
+    ctx.beginPath();
+    ctx.arc(fx, fy, CELL_PX / 2 + 2, 0, Math.PI * 2);
+    ctx.fill();
+    // Food dot
     ctx.fillStyle = "#f87171";
     ctx.shadowColor = "#f87171";
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.arc(
-      s.food.x * CELL_PX + CELL_PX / 2,
-      s.food.y * CELL_PX + CELL_PX / 2,
-      CELL_PX / 2 - 2,
-      0,
-      Math.PI * 2
-    );
+    ctx.arc(fx, fy, CELL_PX / 2 - 2, 0, Math.PI * 2);
     ctx.fill();
-    ctx.shadowBlur = 0;
+    ctx.restore();
 
     // Snake
     s.snake.forEach((p, i) => {
+      ctx.save();
       const isHead = i === 0;
       const alpha = 1 - i * (0.5 / s.snake.length);
       ctx.fillStyle = isHead
@@ -238,11 +256,13 @@ function SnakeGame() {
           ? "#34d399"
           : "#f87171"
         : `rgba(52,211,153,${alpha})`;
-      ctx.shadowColor = isHead ? (s.alive ? "#34d399" : "#f87171") : "transparent";
-      ctx.shadowBlur = isHead ? 6 : 0;
+      if (isHead) {
+        ctx.shadowColor = s.alive ? "#34d399" : "#f87171";
+        ctx.shadowBlur = 6;
+      }
       const r = isHead ? 5 : 3;
       roundRect(ctx, p.x * CELL_PX + 1, p.y * CELL_PX + 1, CELL_PX - 2, CELL_PX - 2, r);
-      ctx.shadowBlur = 0;
+      ctx.restore();
     });
   }, []);
 
@@ -404,6 +424,289 @@ function SnakeGame() {
         <span>S/↓ Down</span>
         <span>·</span>
         <span>D/→ Right</span>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   Flappy Bird
+   ════════════════════════════════════════════════════════════ */
+
+const FLAPPY_W = 320;
+const FLAPPY_H = 380;
+const BIRD_SIZE = 14;
+const PIPE_WIDTH = 36;
+const PIPE_GAP = 100;
+const GRAVITY = 0.35;
+const JUMP_VEL = -5.5;
+const PIPE_SPEED = 2;
+const PIPE_SPAWN_INTERVAL = 100; // frames
+
+interface Pipe {
+  x: number;
+  gapY: number;
+  passed: boolean;
+}
+
+interface FlappyState {
+  birdY: number;
+  birdVel: number;
+  pipes: Pipe[];
+  score: number;
+  best: number;
+  alive: boolean;
+  started: boolean;
+  frameCount: number;
+}
+
+function FlappyBirdGame() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stateRef = useRef<FlappyState>({
+    birdY: FLAPPY_H / 2,
+    birdVel: 0,
+    pipes: [],
+    score: 0,
+    best: parseInt(localStorage.getItem("gv_flappy_best") || "0", 10),
+    alive: true,
+    started: false,
+    frameCount: 0,
+  });
+  const animRef = useRef<number>(0);
+  const [, forceUpdate] = useState(0);
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const s = stateRef.current;
+
+    ctx.clearRect(0, 0, FLAPPY_W, FLAPPY_H);
+
+    // Sky gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, FLAPPY_H);
+    grad.addColorStop(0, "#0c1222");
+    grad.addColorStop(1, "#1a1a2e");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, FLAPPY_W, FLAPPY_H);
+
+    // Stars
+    ctx.fillStyle = "rgba(255,255,255,0.15)";
+    for (let i = 0; i < 30; i++) {
+      const sx = ((i * 97 + 13) % FLAPPY_W);
+      const sy = ((i * 53 + 7) % (FLAPPY_H - 40));
+      ctx.fillRect(sx, sy, 1, 1);
+    }
+
+    // Ground
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(0, FLAPPY_H - 20, FLAPPY_W, 20);
+    ctx.fillStyle = "#334155";
+    ctx.fillRect(0, FLAPPY_H - 20, FLAPPY_W, 2);
+
+    // Pipes
+    s.pipes.forEach((pipe) => {
+      const topH = pipe.gapY - PIPE_GAP / 2;
+      const botY = pipe.gapY + PIPE_GAP / 2;
+
+      // Top pipe
+      ctx.fillStyle = "#10b981";
+      ctx.fillRect(pipe.x, 0, PIPE_WIDTH, topH);
+      ctx.fillStyle = "#059669";
+      ctx.fillRect(pipe.x - 3, topH - 12, PIPE_WIDTH + 6, 12);
+
+      // Bottom pipe
+      ctx.fillStyle = "#10b981";
+      ctx.fillRect(pipe.x, botY, PIPE_WIDTH, FLAPPY_H - 20 - botY);
+      ctx.fillStyle = "#059669";
+      ctx.fillRect(pipe.x - 3, botY, PIPE_WIDTH + 6, 12);
+    });
+
+    // Bird
+    ctx.save();
+    const birdX = 60;
+    const rotation = Math.min(Math.max(s.birdVel * 3, -30), 70) * (Math.PI / 180);
+    ctx.translate(birdX, s.birdY);
+    ctx.rotate(rotation);
+
+    // Body
+    ctx.fillStyle = s.alive ? "#fbbf24" : "#ef4444";
+    ctx.shadowColor = s.alive ? "#fbbf24" : "#ef4444";
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, BIRD_SIZE, BIRD_SIZE * 0.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Wing
+    ctx.fillStyle = s.alive ? "#f59e0b" : "#dc2626";
+    ctx.beginPath();
+    const wingFlap = Math.sin(s.frameCount * 0.3) * 3;
+    ctx.ellipse(-3, wingFlap, 8, 5, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(6, -3, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.arc(7.5, -3, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Beak
+    ctx.fillStyle = "#f97316";
+    ctx.beginPath();
+    ctx.moveTo(BIRD_SIZE - 2, -2);
+    ctx.lineTo(BIRD_SIZE + 6, 1);
+    ctx.lineTo(BIRD_SIZE - 2, 4);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+
+    // Score
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 20px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(String(s.score), FLAPPY_W / 2, 35);
+
+    if (s.best > 0) {
+      ctx.fillStyle = "rgba(255,255,255,0.3)";
+      ctx.font = "9px sans-serif";
+      ctx.fillText(`Best: ${s.best}`, FLAPPY_W / 2, 52);
+    }
+  }, []);
+
+  const tick = useCallback(() => {
+    const s = stateRef.current;
+    if (!s.alive || !s.started) {
+      draw();
+      return;
+    }
+
+    s.frameCount++;
+    s.birdVel += GRAVITY;
+    s.birdY += s.birdVel;
+
+    // Ground/ceiling
+    if (s.birdY > FLAPPY_H - 20 - BIRD_SIZE || s.birdY < BIRD_SIZE) {
+      s.alive = false;
+      if (s.score > s.best) {
+        s.best = s.score;
+        localStorage.setItem("gv_flappy_best", String(s.score));
+      }
+      draw();
+      forceUpdate((n) => n + 1);
+      return;
+    }
+
+    // Spawn pipes
+    if (s.frameCount % PIPE_SPAWN_INTERVAL === 0) {
+      const gapY = 60 + Math.random() * (FLAPPY_H - 140);
+      s.pipes.push({ x: FLAPPY_W, gapY, passed: false });
+    }
+
+    // Move + collide
+    const birdX = 60;
+    s.pipes = s.pipes.filter((p) => p.x + PIPE_WIDTH > -10);
+    for (const pipe of s.pipes) {
+      pipe.x -= PIPE_SPEED;
+      if (!pipe.passed && pipe.x + PIPE_WIDTH < birdX) {
+        pipe.passed = true;
+        s.score++;
+      }
+      if (birdX + BIRD_SIZE > pipe.x && birdX - BIRD_SIZE < pipe.x + PIPE_WIDTH) {
+        const topH = pipe.gapY - PIPE_GAP / 2;
+        const botY = pipe.gapY + PIPE_GAP / 2;
+        if (s.birdY - BIRD_SIZE * 0.8 < topH || s.birdY + BIRD_SIZE * 0.8 > botY) {
+          s.alive = false;
+          if (s.score > s.best) {
+            s.best = s.score;
+            localStorage.setItem("gv_flappy_best", String(s.score));
+          }
+          draw();
+          forceUpdate((n) => n + 1);
+          return;
+        }
+      }
+    }
+
+    draw();
+    animRef.current = requestAnimationFrame(tick);
+  }, [draw]);
+
+  const jump = useCallback(() => {
+    const s = stateRef.current;
+    if (!s.started || !s.alive) {
+      s.birdY = FLAPPY_H / 2;
+      s.birdVel = 0;
+      s.pipes = [];
+      s.score = 0;
+      s.alive = true;
+      s.started = true;
+      s.frameCount = 0;
+      s.birdVel = JUMP_VEL;
+      cancelAnimationFrame(animRef.current);
+      animRef.current = requestAnimationFrame(tick);
+      forceUpdate((n) => n + 1);
+      return;
+    }
+    s.birdVel = JUMP_VEL;
+  }, [tick]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === " " || e.key === "ArrowUp" || e.key.toLowerCase() === "w") {
+        e.preventDefault();
+        jump();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [jump]);
+
+  useEffect(() => {
+    draw();
+    return () => cancelAnimationFrame(animRef.current);
+  }, [draw]);
+
+  const s = stateRef.current;
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full py-3 gap-2">
+      <div
+        className="relative rounded-xl border border-white/10 overflow-hidden cursor-pointer"
+        style={{ width: FLAPPY_W, height: FLAPPY_H }}
+        onClick={jump}
+      >
+        <canvas ref={canvasRef} width={FLAPPY_W} height={FLAPPY_H} className="block" />
+        {!s.started && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">
+            <p className="text-sm font-bold text-amber-400 mb-1">Flappy Bird</p>
+            <p className="text-[9px] text-white/50 mb-2">Click or press Space to fly</p>
+            {s.best > 0 && <p className="text-[8px] text-white/30">Best: {s.best}</p>}
+          </div>
+        )}
+        {s.started && !s.alive && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
+            <p className="text-sm font-bold text-red-400 mb-0.5">Game Over</p>
+            <p className="text-[10px] text-white/70 mb-1">Score: {s.score}</p>
+            {s.score >= s.best && s.score > 0 && (
+              <p className="text-[8px] text-amber-400 mb-1">New Best!</p>
+            )}
+            <p className="text-[8px] text-white/40">Click or Space to retry</p>
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-3 text-[8px] text-white/30">
+        <span>Space / Click to flap</span>
+        <span>·</span>
+        <span>Score: {s.score}</span>
+        <span>·</span>
+        <span>Best: {s.best}</span>
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { Pin, PinOff, Plus, Trash2, Pencil, X, Check } from "lucide-react";
+import { Pin, PinOff, Plus, Trash2, X, Check } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { GameNote } from "@/types";
 
@@ -203,6 +203,26 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
     );
   }
 
+  // No game selected state
+  if (!gameId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full py-6 px-4">
+        <div className="size-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-3">
+          <Pin className="size-4 text-amber-400" />
+        </div>
+        <p className="text-[10px] font-semibold text-white/80 mb-1">No Game Selected</p>
+        <p className="text-[8px] text-white/40 text-center max-w-48 leading-relaxed mb-3">
+          Select a game from the <span className="text-white/60 font-medium">Ops</span> tab first to view and create notes for it.
+        </p>
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.03] p-2.5 max-w-48 text-center">
+          <p className="text-[8px] text-white/50 leading-relaxed">
+            Switch to the <span className="font-medium text-white/70">Ops</span> tab → select a game from the dropdown → come back here to manage notes.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Notes list
   return (
     <div className="flex flex-col h-full">
@@ -222,61 +242,66 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
+        <div className="p-2">
           {isLoading ? (
-            Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-12 rounded-lg bg-white/[0.04] animate-pulse" />
-            ))
+            <div className="grid grid-cols-2 gap-1.5">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-20 rounded-lg bg-white/[0.04] animate-pulse" />
+              ))}
+            </div>
           ) : notes.length === 0 ? (
             <div className="text-center py-6">
-              <p className="text-[9px] text-white/30">No notes yet</p>
+              <div className="size-8 rounded-full bg-white/[0.04] flex items-center justify-center mx-auto mb-2">
+                <Plus className="size-3.5 text-white/20" />
+              </div>
+              <p className="text-[9px] text-white/40 mb-1">No notes for {gameName || "this game"}</p>
+              <p className="text-[7px] text-white/25 mb-2 max-w-40 mx-auto">Keep track of strategies, passwords, save locations, or anything you want to remember</p>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-5 text-[8px] mt-1 text-white/50"
+                className="h-6 text-[8px] text-white/60 hover:text-white border border-white/10 hover:border-white/20"
                 onClick={startCreate}
               >
-                <Plus className="size-2.5" /> Create one
+                <Plus className="size-2.5 mr-1" /> Create your first note
               </Button>
             </div>
           ) : (
-            notes.map((note) => (
-              <div
-                key={note.id}
-                className="group rounded-lg border border-white/[0.06] bg-white/[0.03] overflow-hidden hover:bg-white/[0.06] transition-colors"
-              >
-                <div className="h-0.5" style={{ backgroundColor: note.color }} />
-                <div className="px-2 py-1.5">
-                  <div className="flex items-start justify-between gap-1">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[9px] font-medium truncate">{note.title}</p>
-                      <p className="text-[8px] text-white/40 line-clamp-2">{note.content || "Empty"}</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {notes.map((note) => (
+                <div
+                  key={note.id}
+                  className="group rounded-lg border border-white/[0.06] overflow-hidden hover:border-white/15 transition-all cursor-pointer"
+                  style={{ backgroundColor: `${note.color}08` }}
+                  onClick={() => startEdit(note)}
+                >
+                  <div className="h-0.5" style={{ backgroundColor: note.color }} />
+                  <div className="px-2 py-1.5">
+                    <div className="flex items-start justify-between gap-0.5">
+                      <p className="text-[9px] font-medium truncate flex-1">{note.title}</p>
+                      {note.is_pinned && <Pin className="size-2 text-white/30 shrink-0 mt-0.5" />}
                     </div>
-                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      <button
-                        className="size-4 flex items-center justify-center rounded text-white/40 hover:text-white"
-                        onClick={() => handleTogglePin(note)}
-                      >
-                        {note.is_pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
-                      </button>
-                      <button
-                        className="size-4 flex items-center justify-center rounded text-white/40 hover:text-white"
-                        onClick={() => startEdit(note)}
-                      >
-                        <Pencil className="size-2.5" />
-                      </button>
-                      <button
-                        className="size-4 flex items-center justify-center rounded text-white/40 hover:text-red-400"
-                        onClick={() => handleDelete(note.id)}
-                      >
-                        <Trash2 className="size-2.5" />
-                      </button>
+                    <p className="text-[7px] text-white/35 line-clamp-2 mt-0.5 leading-relaxed">{note.content || "Empty"}</p>
+                    <div className="flex items-center justify-between mt-1">
+                      <p className="text-[6px] text-white/20">{formatRelativeTime(note.updated_at)}</p>
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          className="size-3.5 flex items-center justify-center rounded text-white/30 hover:text-white"
+                          onClick={(e) => { e.stopPropagation(); handleTogglePin(note); }}
+                        >
+                          {note.is_pinned ? <PinOff className="size-2" /> : <Pin className="size-2" />}
+                        </button>
+                        <button
+                          className="size-3.5 flex items-center justify-center rounded text-white/30 hover:text-red-400"
+                          onClick={(e) => { e.stopPropagation(); handleDelete(note.id); }}
+                        >
+                          <Trash2 className="size-2" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <p className="text-[7px] text-white/25 mt-0.5">{formatRelativeTime(note.updated_at)}</p>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       </ScrollArea>

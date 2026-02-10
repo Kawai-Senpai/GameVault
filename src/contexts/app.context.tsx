@@ -59,13 +59,13 @@ const defaultSettings: AppSettings = {
   ai_api_key: "",
   ai_openrouter_api_key: "",
   ai_openai_api_key: "",
-  ai_model: "openai/gpt-4o-mini",
+  ai_model: "openai/gpt-4o:online",
   overlay_shortcut: "Ctrl+Shift+G",
   screenshot_shortcut: "F12",
   quick_backup_shortcut: "Ctrl+Shift+B",
   setup_complete: false,
   auto_backup_enabled: true,
-  auto_backup_interval_minutes: 30,
+  auto_backup_interval_minutes: 1440,
   max_backups_per_game: 10,
   compress_backups: true,
   notify_backup_complete: true,
@@ -374,12 +374,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ]
           );
 
-          const rows = (await conn.select(
-            "SELECT id, file_path FROM backups WHERE game_id = $1 ORDER BY created_at DESC",
+          // Only prune auto-created backups — manual/overlay backups are never auto-deleted
+          const autoRows = (await conn.select(
+            "SELECT id, file_path FROM backups WHERE game_id = $1 AND display_name LIKE '%Auto%' ORDER BY created_at DESC",
             [game.id]
           )) as Array<{ id: string; file_path: string }>;
-          if (rows.length > settings.max_backups_per_game) {
-            const overflow = rows.slice(settings.max_backups_per_game);
+          if (autoRows.length > settings.max_backups_per_game) {
+            const overflow = autoRows.slice(settings.max_backups_per_game);
             for (const old of overflow) {
               try {
                 await invoke("delete_backup", { zipPath: old.file_path });
@@ -594,6 +595,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           // Recompute ai_api_key when provider or provider keys change
           if (key === "ai_provider") {
             updated.ai_api_key = value === "openai" ? updated.ai_openai_api_key : updated.ai_openrouter_api_key;
+            // Set sensible default model when switching providers
+            if (value === "openai" && updated.ai_model.includes("/")) {
+              updated.ai_model = "gpt-5.2";
+            } else if (value === "openrouter" && !updated.ai_model.includes("/")) {
+              updated.ai_model = "openai/gpt-4o:online";
+            }
           } else if (key === "ai_openrouter_api_key" && updated.ai_provider === "openrouter") {
             updated.ai_api_key = value;
           } else if (key === "ai_openai_api_key" && updated.ai_provider === "openai") {

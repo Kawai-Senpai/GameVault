@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import {
   Camera,
   Search,
@@ -105,6 +105,20 @@ export default function Screenshots() {
       await conn.execute("DELETE FROM screenshots WHERE id = $1", [ss.id]);
       setScreenshots((prev) => prev.filter((s) => s.id !== ss.id));
       toast.success("Screenshot deleted");
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  };
+
+  const handleRename = async (id: string, title: string) => {
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      await conn.execute("UPDATE screenshots SET title = $1 WHERE id = $2", [title, id]);
+      setScreenshots((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title } : s))
+      );
+      toast.success("Screenshot renamed");
     } catch (err) {
       toast.error(`${err}`);
     }
@@ -221,6 +235,7 @@ export default function Screenshots() {
                 screenshot={ss}
                 gameName={games.find((g) => g.id === ss.game_id)?.name}
                 onDelete={() => handleDelete(ss)}
+                onRename={handleRename}
               />
             ))}
           </div>
@@ -232,6 +247,7 @@ export default function Screenshots() {
                 screenshot={ss}
                 gameName={games.find((g) => g.id === ss.game_id)?.name}
                 onDelete={() => handleDelete(ss)}
+                onRename={handleRename}
               />
             ))}
           </div>
@@ -245,12 +261,16 @@ function ScreenshotCard({
   screenshot,
   gameName,
   onDelete,
+  onRename,
 }: {
   screenshot: Screenshot;
   gameName?: string;
   onDelete: () => void;
+  onRename: (id: string, title: string) => void;
 }) {
   const [imgError, setImgError] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(screenshot.title || "");
 
   const handleOpen = async () => {
     try {
@@ -273,7 +293,7 @@ function ScreenshotCard({
           </div>
         ) : (
           <img
-            src={`https://asset.localhost/${screenshot.thumbnail_path || screenshot.file_path}`}
+            src={convertFileSrc(screenshot.thumbnail_path || screenshot.file_path)}
             alt={screenshot.title || "Screenshot"}
             className="w-full h-full object-cover transition-transform group-hover:scale-105"
             loading="lazy"
@@ -286,9 +306,34 @@ function ScreenshotCard({
       </button>
       <div className="p-2.5 flex items-start gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-medium truncate">
-            {screenshot.title || formatDate(screenshot.captured_at)}
-          </p>
+          {isRenaming ? (
+            <div className="flex items-center gap-1">
+              <Input
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    onRename(screenshot.id, renameValue.trim());
+                    setIsRenaming(false);
+                  } else if (e.key === "Escape") {
+                    setIsRenaming(false);
+                    setRenameValue(screenshot.title || "");
+                  }
+                }}
+                placeholder="Screenshot name..."
+                className="h-5 text-[9px]"
+                autoFocus
+              />
+            </div>
+          ) : (
+            <p
+              className="text-[10px] font-medium truncate cursor-pointer hover:text-primary transition-colors"
+              onClick={(e) => { e.stopPropagation(); setIsRenaming(true); }}
+              title="Click to rename"
+            >
+              {screenshot.title || formatDate(screenshot.captured_at)}
+            </p>
+          )}
           <div className="flex items-center gap-1.5 text-[8px] text-muted-foreground">
             {gameName && <span>{gameName}</span>}
             <span>
@@ -317,12 +362,16 @@ function ScreenshotListItem({
   screenshot,
   gameName,
   onDelete,
+  onRename,
 }: {
   screenshot: Screenshot;
   gameName?: string;
   onDelete: () => void;
+  onRename: (id: string, title: string) => void;
 }) {
   const [imgError, setImgError] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(screenshot.title || "");
 
   const handleOpen = async () => {
     try {
@@ -344,7 +393,7 @@ function ScreenshotListItem({
           </div>
         ) : (
           <img
-            src={`https://asset.localhost/${screenshot.thumbnail_path || screenshot.file_path}`}
+            src={convertFileSrc(screenshot.thumbnail_path || screenshot.file_path)}
             alt={screenshot.title || "Screenshot"}
             className="w-full h-full object-cover"
             loading="lazy"
@@ -353,9 +402,33 @@ function ScreenshotListItem({
         )}
       </button>
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium truncate">
-          {screenshot.title || formatDate(screenshot.captured_at)}
-        </div>
+        {isRenaming ? (
+          <Input
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                onRename(screenshot.id, renameValue.trim());
+                setIsRenaming(false);
+              } else if (e.key === "Escape") {
+                setIsRenaming(false);
+                setRenameValue(screenshot.title || "");
+              }
+            }}
+            onBlur={() => setIsRenaming(false)}
+            placeholder="Screenshot name..."
+            className="h-5 text-[10px]"
+            autoFocus
+          />
+        ) : (
+          <div
+            className="text-xs font-medium truncate cursor-pointer hover:text-primary transition-colors"
+            onClick={() => setIsRenaming(true)}
+            title="Click to rename"
+          >
+            {screenshot.title || formatDate(screenshot.captured_at)}
+          </div>
+        )}
         <div className="flex items-center gap-2 text-[9px] text-muted-foreground">
           {gameName && <span>{gameName}</span>}
           <span>{screenshot.width}×{screenshot.height}</span>

@@ -334,7 +334,7 @@ export default function Settings() {
                 <Input
                   value={settings.ai_model}
                   onChange={(e) => handleUpdate("ai_model", e.target.value)}
-                  placeholder={settings.ai_provider === "openrouter" ? "openai/gpt-4o-mini" : "gpt-4o-mini"}
+                  placeholder={settings.ai_provider === "openrouter" ? "openai/gpt-4o:online" : "gpt-5.2"}
                   className="w-full text-[10px] font-mono"
                 />
               </div>
@@ -427,24 +427,27 @@ export default function Settings() {
 
               {settings.auto_backup_enabled && (
                 <div>
-                  <Label className="text-[10px]">Backup Interval (minutes)</Label>
-                  <Input
-                    type="number"
-                    value={settings.auto_backup_interval_minutes}
-                    onChange={(e) =>
-                      handleUpdate(
-                        "auto_backup_interval_minutes",
-                        Math.max(5, parseInt(e.target.value) || 30)
-                      )
-                    }
-                    min={5}
-                    className="mt-1 w-32"
-                  />
+                  <Label className="text-[10px]">Auto-Backup Interval</Label>
+                  <Select
+                    value={String(settings.auto_backup_interval_minutes)}
+                    onValueChange={(v) => handleUpdate("auto_backup_interval_minutes", parseInt(v))}
+                  >
+                    <SelectTrigger className="mt-1 w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="360">Every 6 hours</SelectItem>
+                      <SelectItem value="720">Every 12 hours</SelectItem>
+                      <SelectItem value="1440">Once a day</SelectItem>
+                      <SelectItem value="2880">Every 2 days</SelectItem>
+                      <SelectItem value="10080">Once a week</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
 
               <div>
-                <Label className="text-[10px]">Max Backups Per Game</Label>
+                <Label className="text-[10px]">Max Auto-Backups Per Game</Label>
                 <Input
                   type="number"
                   value={settings.max_backups_per_game}
@@ -458,7 +461,7 @@ export default function Settings() {
                   className="mt-1 w-32"
                 />
                 <p className="text-[9px] text-muted-foreground mt-0.5">
-                  Oldest backups are auto-deleted when exceeded
+                  Only auto-backups are pruned — your manual backups are never deleted
                 </p>
               </div>
 
@@ -623,10 +626,6 @@ export default function Settings() {
                 <div className="flex justify-between">
                   <span>Version</span>
                   <Badge variant="secondary" className="text-[8px]">2.0.0-alpha</Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span>Engine</span>
-                  <span>Tauri v2 + React</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Games in library</span>

@@ -26,7 +26,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import {
   Play,
   Save,
@@ -1045,7 +1045,7 @@ function ScreenshotCard({ screenshot }: { screenshot: Screenshot }) {
           </div>
         ) : (
           <img
-            src={`https://asset.localhost/${screenshot.thumbnail_path || screenshot.file_path}`}
+            src={convertFileSrc(screenshot.thumbnail_path || screenshot.file_path)}
             alt={screenshot.title || "Screenshot"}
             className="w-full h-full object-cover transition-transform group-hover:scale-105"
             loading="lazy"
