@@ -24,7 +24,6 @@ import {
   Star,
   Plus,
   Sparkles,
-  Shield,
   FolderOpen,
   StickyNote,
 } from "lucide-react";
@@ -78,8 +77,8 @@ export default function Sidebar() {
       >
         {/* Header */}
         <div className="flex items-center gap-2 px-3 h-12 border-b border-sidebar-border shrink-0">
-          <div className="flex items-center justify-center size-7 rounded-lg bg-gaming/15">
-            <Shield className="size-3.5 text-gaming" />
+          <div className="size-7 rounded-lg overflow-hidden shrink-0">
+            <img src="/icon-192.png" alt="GameVault" className="w-full h-full object-cover" draggable={false} />
           </div>
           {!sidebarCollapsed && (
             <div className="flex flex-col min-w-0">

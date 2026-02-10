@@ -45,7 +45,7 @@ const defaultSettings: AppSettings = {
   ai_openrouter_api_key: "",
   ai_openai_api_key: "",
   ai_model: "openai/gpt-4o-mini",
-  overlay_shortcut: "Shift+Tab",
+  overlay_shortcut: "Ctrl+Shift+G",
   screenshot_shortcut: "F12",
   quick_backup_shortcut: "Ctrl+Shift+B",
   setup_complete: false,

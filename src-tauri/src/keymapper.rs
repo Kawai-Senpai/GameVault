@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct KeyEvent {
     pub key_code: u32,
     pub is_press: bool,

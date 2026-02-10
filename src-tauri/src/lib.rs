@@ -196,6 +196,16 @@ pub fn run() {
                             "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        // Migration 2: Update overlay shortcut (Shift+Tab conflicts with Steam)
+                        tauri_plugin_sql::Migration {
+                            version: 2,
+                            description: "Update overlay shortcut to Ctrl+Shift+G",
+                            sql: r#"
+                                UPDATE settings SET value = 'Ctrl+Shift+G' WHERE key = 'overlay_shortcut' AND value = 'Shift+Tab';
+                                UPDATE shortcuts SET keys = 'Ctrl+Shift+G' WHERE id = 's1' AND keys = 'Shift+Tab';
+                            "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -350,6 +360,7 @@ async fn open_external_url(url: String) -> Result<(), String> {
 
 // ─── AI Chat Command ───────────────────────────────────────────
 #[derive(serde::Deserialize)]
+#[allow(dead_code)]
 struct ChatMsg {
     role: String,
     content: String,
