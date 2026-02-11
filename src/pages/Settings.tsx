@@ -341,6 +341,17 @@ export default function Settings() {
                   <span>Transparent</span>
                   <span>Opaque</span>
                 </div>
+                {/* Live preview */}
+                <div className="mt-2.5 h-10 rounded-lg border border-border/40 overflow-hidden relative">
+                  <div className="absolute inset-0 bg-[repeating-conic-gradient(rgb(200_200_200)_0%_25%,transparent_0%_50%)_0_0/16px_16px] dark:bg-[repeating-conic-gradient(rgb(40_40_40)_0%_25%,transparent_0%_50%)_0_0/16px_16px]" />
+                  <div
+                    className="absolute inset-0 flex items-center justify-center text-[9px] font-medium text-white"
+                    style={{ background: `rgba(0,0,0,${settings.overlay_opacity / 100})` }}
+                  >
+                    Preview: {settings.overlay_opacity}% opacity
+                  </div>
+                </div>
+                <p className="text-[8px] text-muted-foreground mt-1">Changes apply next time the overlay is opened</p>
               </div>
             </CardContent>
           </Card>

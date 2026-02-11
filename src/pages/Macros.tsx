@@ -32,8 +32,10 @@ import {
   Play,
   Repeat,
   Timer,
+  Keyboard,
 } from "lucide-react";
 import { cn, generateId } from "@/lib/utils";
+import { keyNameToVk } from "@/lib/keycode-map";
 import type { Macro, MacroAction } from "@/types";
 
 export default function Macros() {
@@ -52,6 +54,7 @@ export default function Macros() {
   const [formRepeat, setFormRepeat] = useState("1");
   const [formActions, setFormActions] = useState<MacroAction[]>([]);
   const [isRecordingTrigger, setIsRecordingTrigger] = useState(false);
+  const [recordingActionIdx, setRecordingActionIdx] = useState<number | null>(null);
 
   useEffect(() => {
     loadMacros();
@@ -81,8 +84,9 @@ export default function Macros() {
 
   const handleTriggerKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (!isRecordingTrigger) return;
+      if (!isRecordingTrigger && recordingActionIdx === null) return;
       e.preventDefault();
+      e.stopPropagation();
       const key = e.key === " " ? "Space" : e.key;
       const parts: string[] = [];
       if (e.ctrlKey) parts.push("Ctrl");
@@ -91,18 +95,36 @@ export default function Macros() {
       if (!["Control", "Shift", "Alt", "Meta"].includes(e.key)) {
         parts.push(key.length === 1 ? key.toUpperCase() : key);
       }
-      setFormTriggerKey(parts.join("+"));
-      setIsRecordingTrigger(false);
+      const combo = parts.join("+");
+      if (!combo) return;
+
+      if (isRecordingTrigger) {
+        setFormTriggerKey(combo);
+        setIsRecordingTrigger(false);
+      } else if (recordingActionIdx !== null) {
+        // Find VK code for the main key
+        const mainKey = parts[parts.length - 1];
+        const vk = keyNameToVk(mainKey) || 0;
+        setFormActions((prev) =>
+          prev.map((a, i) =>
+            i === recordingActionIdx
+              ? { ...a, key_name: combo, key_code: vk }
+              : a
+          )
+        );
+        setRecordingActionIdx(null);
+      }
     },
-    [isRecordingTrigger]
+    [isRecordingTrigger, recordingActionIdx]
   );
 
   useEffect(() => {
-    if (isRecordingTrigger) {
-      window.addEventListener("keydown", handleTriggerKeyDown);
-      return () => window.removeEventListener("keydown", handleTriggerKeyDown);
+    if (isRecordingTrigger || recordingActionIdx !== null) {
+      // Use capture phase to intercept keys before dialog focus trap steals them (e.g. Tab)
+      window.addEventListener("keydown", handleTriggerKeyDown, true);
+      return () => window.removeEventListener("keydown", handleTriggerKeyDown, true);
     }
-  }, [isRecordingTrigger, handleTriggerKeyDown]);
+  }, [isRecordingTrigger, recordingActionIdx, handleTriggerKeyDown]);
 
   const openCreateDialog = () => {
     setEditingMacro(null);
@@ -113,6 +135,7 @@ export default function Macros() {
     setFormDelay("50");
     setFormRepeat("1");
     setFormActions([]);
+    setRecordingActionIdx(null);
     setDialogOpen(true);
   };
 
@@ -352,7 +375,10 @@ export default function Macros() {
                   "w-full mt-1 h-9 font-mono text-xs",
                   isRecordingTrigger && "border-primary ring-2 ring-primary/30"
                 )}
-                onClick={() => setIsRecordingTrigger(true)}
+                onClick={() => {
+                  setIsRecordingTrigger(true);
+                  setRecordingActionIdx(null);
+                }}
               >
                 {isRecordingTrigger ? (
                   <span className="text-primary animate-pulse">Press a key...</span>
@@ -414,21 +440,57 @@ export default function Macros() {
                 </div>
               </div>
               {formActions.length > 0 ? (
-                <div className="mt-1.5 space-y-1 max-h-32 overflow-y-auto">
+                <div className="mt-1.5 space-y-1 max-h-40 overflow-y-auto">
                   {formActions.map((action, idx) => (
                     <div
                       key={idx}
-                      className="flex items-center gap-2 px-2 py-1 rounded bg-muted text-[10px]"
+                      className="flex items-center gap-2 px-2 py-1.5 rounded bg-muted text-[10px]"
                     >
-                      <span className="text-muted-foreground w-4">{idx + 1}.</span>
-                      <span className="flex-1">
-                        {action.type === "delay"
-                          ? `Wait ${action.delay_ms}ms`
-                          : `${action.type}: ${action.key_name || "?"}`}
-                      </span>
+                      <span className="text-muted-foreground w-4 shrink-0">{idx + 1}.</span>
+                      {action.type === "delay" ? (
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <Timer className="size-3 text-muted-foreground shrink-0" />
+                          <span className="text-muted-foreground shrink-0">Wait</span>
+                          <Input
+                            type="number"
+                            value={action.delay_ms || 100}
+                            onChange={(e) => {
+                              const ms = parseInt(e.target.value) || 100;
+                              setFormActions((prev) =>
+                                prev.map((a, i) => (i === idx ? { ...a, delay_ms: ms } : a))
+                              );
+                            }}
+                            min="10"
+                            className="h-5 w-16 text-[9px] px-1"
+                          />
+                          <span className="text-muted-foreground">ms</span>
+                        </div>
+                      ) : (
+                        <button
+                          className={cn(
+                            "flex items-center gap-1.5 flex-1 text-left rounded px-1 py-0.5 transition-colors",
+                            recordingActionIdx === idx
+                              ? "bg-primary/10 ring-1 ring-primary/30"
+                              : "hover:bg-accent/50 cursor-pointer"
+                          )}
+                          onClick={() => {
+                            setRecordingActionIdx(idx);
+                            setIsRecordingTrigger(false);
+                          }}
+                        >
+                          <Keyboard className="size-3 text-muted-foreground shrink-0" />
+                          {recordingActionIdx === idx ? (
+                            <span className="text-primary animate-pulse text-[9px]">Press a key or combo...</span>
+                          ) : action.key_name ? (
+                            <kbd className="px-1 py-0.5 rounded bg-background text-[9px] font-mono">{action.key_name}</kbd>
+                          ) : (
+                            <span className="text-muted-foreground text-[9px]">Click to record key</span>
+                          )}
+                        </button>
+                      )}
                       <button
                         onClick={() => removeAction(idx)}
-                        className="text-destructive hover:text-destructive/80"
+                        className="text-destructive hover:text-destructive/80 shrink-0"
                       >
                         <Trash2 className="size-2.5" />
                       </button>
@@ -437,7 +499,7 @@ export default function Macros() {
                 </div>
               ) : (
                 <p className="text-[9px] text-muted-foreground mt-1">
-                  No actions added yet
+                  No actions added yet. Add key taps or delays to build the macro sequence.
                 </p>
               )}
             </div>

@@ -85,6 +85,31 @@ export default function Overlay() {
     };
   }, []);
 
+  // Poll overlay_opacity from DB so changes made in Settings (separate window) are reflected live.
+  // The main window and overlay are separate React trees — they don't share React state.
+  const [liveOpacity, setLiveOpacity] = useState(settings.overlay_opacity);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const db = await import("@tauri-apps/plugin-sql");
+        const conn = await db.default.load("sqlite:gamevault.db");
+        const rows = (await conn.select(
+          "SELECT value FROM settings WHERE key = 'overlay_opacity'"
+        )) as { value: string }[];
+        if (!cancelled && rows[0]) {
+          const val = parseInt(rows[0].value);
+          if (!isNaN(val) && val >= 0 && val <= 100) {
+            setLiveOpacity(val);
+          }
+        }
+      } catch { /* silent */ }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 2000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
   const selectedGame = games.find((g) => g.id === selectedGameId) || null;
   const selectedWindow = runningWindows.find((w) => windowKey(w) === selectedWindowKey) || null;
 
@@ -518,8 +543,11 @@ export default function Overlay() {
 
       {/* ── Strip Bar ─────────────────────────────────────── */}
       <div
-        className="flex items-center gap-1.5 h-[54px] px-3 rounded-b-2xl border border-white/[0.12] border-t-0 backdrop-blur-2xl text-white mx-auto"
-        style={{ maxWidth: 700, WebkitAppRegion: "drag", background: `rgba(0,0,0,${(settings.overlay_opacity || 92) / 100})` } as React.CSSProperties}
+        className={cn(
+          "flex items-center gap-1.5 h-[54px] px-3 rounded-t-2xl border border-white/[0.12] backdrop-blur-2xl text-white mx-auto",
+          expanded ? "rounded-b-none border-b-0" : "rounded-b-2xl"
+        )}
+        style={{ maxWidth: 700, WebkitAppRegion: "drag", background: `rgba(0,0,0,${(liveOpacity || 92) / 100})` } as React.CSSProperties}
       >
         {/* Logo + Game — click opens main app */}
         <img
@@ -656,7 +684,7 @@ export default function Overlay() {
       {expanded && (
         <div
           className="mx-auto rounded-b-2xl border border-white/[0.12] border-t-0 backdrop-blur-2xl text-white overflow-hidden"
-          style={{ maxWidth: 700, height: EXPANDED_HEIGHT - STRIP_HEIGHT, background: `rgba(0,0,0,${(settings.overlay_opacity || 92) / 100})` }}
+          style={{ maxWidth: 700, height: EXPANDED_HEIGHT - STRIP_HEIGHT, background: `rgba(0,0,0,${(liveOpacity || 92) / 100})` }}
         >
           {activeTab === "ops" && (
             <OpsPanel

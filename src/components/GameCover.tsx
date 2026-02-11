@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn, getGameInitials, getCardColor } from "@/lib/utils";
 import { Gamepad2 } from "lucide-react";
 
@@ -34,7 +35,11 @@ export default function GameCover({
   initialsClassName,
   qualityThreshold = 200,
 }: GameCoverProps) {
-  const src = customCoverPath || coverUrl;
+  const rawSrc = customCoverPath || coverUrl;
+  // Convert local file paths to Tauri asset URLs so <img> can load them
+  const src = rawSrc && rawSrc.trim().length > 0 && !rawSrc.startsWith('http') && !rawSrc.startsWith('blob:') && !rawSrc.startsWith('data:')
+    ? convertFileSrc(rawSrc)
+    : rawSrc;
   const hasValidSrc = !!src && src.trim().length > 0;
 
   const [loaded, setLoaded] = useState(false);

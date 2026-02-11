@@ -74,6 +74,8 @@ export default function KeyMapper() {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
       const key = e.key === " " ? "Space" : e.key;
       const parts: string[] = [];
       if (e.ctrlKey) parts.push("Ctrl");
@@ -83,6 +85,7 @@ export default function KeyMapper() {
         parts.push(key.length === 1 ? key.toUpperCase() : key);
       }
       const combo = parts.join("+");
+      if (!combo) return;
 
       if (isRecordingSource) {
         setFormSourceKey(combo);
@@ -97,8 +100,9 @@ export default function KeyMapper() {
 
   useEffect(() => {
     if (isRecordingSource || isRecordingTarget) {
-      window.addEventListener("keydown", handleKeyDown);
-      return () => window.removeEventListener("keydown", handleKeyDown);
+      // Use capture phase to intercept keys before dialog focus trap steals them (e.g. Tab)
+      window.addEventListener("keydown", handleKeyDown, true);
+      return () => window.removeEventListener("keydown", handleKeyDown, true);
     }
   }, [isRecordingSource, isRecordingTarget, handleKeyDown]);
 
@@ -394,6 +398,11 @@ export default function KeyMapper() {
                 className="mt-1"
               />
             </div>
+            <p className="text-[8px] text-muted-foreground bg-muted/50 rounded-md px-2 py-1.5 leading-relaxed">
+              <strong>Tip:</strong> Global key interception works best with modifier combos (Ctrl+X, Shift+F5, etc.)
+              or function keys. Single letter keys cannot be intercepted globally as they would block normal typing.
+              Mappings are active while GameVault is running.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)}>

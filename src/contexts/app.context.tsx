@@ -6,12 +6,13 @@ import React, {
   useRef,
   useState,
 } from "react";
-import type { Game, GameEntry, AppSettings } from "@/types";
+import type { Game, GameEntry, AppSettings, KeyMapping, Macro } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
+import { useKeyEngine } from "@/lib/useKeyEngine";
 
 export interface AutoBackupStatus {
   running: boolean;
@@ -112,6 +113,53 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
   const autoBackupLock = useRef(false);
   const lastAutoBackupRunAt = useRef<number>(0);
+
+  // Key mappings & macros state for the key engine
+  const [activeKeyMappings, setActiveKeyMappings] = useState<KeyMapping[]>([]);
+  const [activeMacros, setActiveMacros] = useState<Macro[]>([]);
+
+  // Detect if this is the overlay window (don't run key engine in overlay)
+  const isOverlay = typeof window !== "undefined" && (
+    window.location.pathname === "/overlay" ||
+    new URLSearchParams(window.location.search).get("window") === "overlay"
+  );
+
+  // Load active key mappings and macros from DB
+  useEffect(() => {
+    if (!settingsLoaded || isOverlay) return;
+    const loadKeysAndMacros = async () => {
+      try {
+        const db = await import("@tauri-apps/plugin-sql");
+        const conn = await db.default.load("sqlite:gamevault.db");
+
+        const keyRows = (await conn.select(
+          "SELECT * FROM key_mappings WHERE is_active = 1"
+        )) as KeyMapping[];
+        setActiveKeyMappings(keyRows.map((r) => ({ ...r, is_active: Boolean(r.is_active) })));
+
+        const macroRows = (await conn.select(
+          "SELECT * FROM macros WHERE is_active = 1"
+        )) as Record<string, unknown>[];
+        setActiveMacros(
+          macroRows.map((r) => ({
+            ...r,
+            actions: JSON.parse((r.actions as string) || "[]"),
+            is_active: Boolean(r.is_active),
+          })) as Macro[]
+        );
+      } catch (err) {
+        console.error("Failed to load key mappings/macros:", err);
+      }
+    };
+    loadKeysAndMacros();
+
+    // Re-load when any DB change might have happened (every 5s)
+    const timer = window.setInterval(loadKeysAndMacros, 5000);
+    return () => window.clearInterval(timer);
+  }, [settingsLoaded, isOverlay]);
+
+  // Register global shortcuts for active key mappings and macros
+  useKeyEngine(activeKeyMappings, activeMacros, settingsLoaded && !isOverlay);
 
   const selectedGame = games.find((g) => g.id === selectedGameId) || null;
 
