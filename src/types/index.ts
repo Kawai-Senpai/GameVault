@@ -176,6 +176,9 @@ export interface AppSettings {
   notify_backup_complete: boolean;
   launch_on_startup: boolean;
   minimize_to_tray: boolean;
+
+  // Overlay
+  overlay_opacity: number; // 0-100 (percent)
 }
 
 // ─── AI Types ────────────────────────────────────────────────

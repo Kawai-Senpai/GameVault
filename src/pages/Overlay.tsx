@@ -518,8 +518,8 @@ export default function Overlay() {
 
       {/* ── Strip Bar ─────────────────────────────────────── */}
       <div
-        className="flex items-center gap-1.5 h-[54px] px-3 rounded-b-2xl border border-white/[0.12] border-t-0 bg-black/75 backdrop-blur-2xl text-white mx-auto"
-        style={{ maxWidth: 700, WebkitAppRegion: "drag" } as React.CSSProperties}
+        className="flex items-center gap-1.5 h-[54px] px-3 rounded-b-2xl border border-white/[0.12] border-t-0 backdrop-blur-2xl text-white mx-auto"
+        style={{ maxWidth: 700, WebkitAppRegion: "drag", background: `rgba(0,0,0,${(settings.overlay_opacity || 92) / 100})` } as React.CSSProperties}
       >
         {/* Logo + Game — click opens main app */}
         <img
@@ -655,8 +655,8 @@ export default function Overlay() {
       {/* ── Expanded Panel ────────────────────────────────── */}
       {expanded && (
         <div
-          className="mx-auto rounded-b-2xl border border-white/[0.12] border-t-0 bg-black/75 backdrop-blur-2xl text-white overflow-hidden"
-          style={{ maxWidth: 700, height: EXPANDED_HEIGHT - STRIP_HEIGHT }}
+          className="mx-auto rounded-b-2xl border border-white/[0.12] border-t-0 backdrop-blur-2xl text-white overflow-hidden"
+          style={{ maxWidth: 700, height: EXPANDED_HEIGHT - STRIP_HEIGHT, background: `rgba(0,0,0,${(settings.overlay_opacity || 92) / 100})` }}
         >
           {activeTab === "ops" && (
             <OpsPanel
@@ -692,7 +692,11 @@ export default function Overlay() {
           {activeTab === "macros" && <OverlayMacros gameId={selectedGameId} />}
           {activeTab === "ai" && (
             <div className="h-full select-text">
-              <OverlayChat settings={settings} />
+              <OverlayChat
+                settings={settings}
+                gameName={selectedGame?.name || matchedGame?.name}
+                exeName={selectedWindow?.process_name}
+              />
             </div>
           )}
           {activeTab === "search" && (

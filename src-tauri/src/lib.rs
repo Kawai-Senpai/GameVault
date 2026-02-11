@@ -215,6 +215,15 @@ pub fn run() {
                             "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        // Migration 4: Overlay opacity setting
+                        tauri_plugin_sql::Migration {
+                            version: 4,
+                            description: "Add overlay opacity setting",
+                            sql: r#"
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('overlay_opacity', '92');
+                            "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -287,6 +296,7 @@ pub fn run() {
             // General
             get_version,
             check_for_updates,
+            download_and_install_update,
             open_external_url,
         ])
         .on_window_event(|window, event| {
@@ -415,13 +425,88 @@ async fn check_for_updates() -> Result<serde_json::Value, String> {
         .trim_start_matches('v');
     let current = env!("CARGO_PKG_VERSION");
 
+    // Find the NSIS installer asset (.exe) for auto-update
+    let mut download_url = String::new();
+    let mut download_size: u64 = 0;
+    if let Some(assets) = json["assets"].as_array() {
+        for asset in assets {
+            let name = asset["name"].as_str().unwrap_or("");
+            // Look for NSIS installer (.exe) or .msi
+            if name.ends_with(".exe") || name.ends_with(".msi") {
+                download_url = asset["browser_download_url"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                download_size = asset["size"].as_u64().unwrap_or(0);
+                break;
+            }
+        }
+    }
+
     Ok(serde_json::json!({
         "current_version": current,
         "latest_version": latest_version,
         "update_available": latest_version != current,
         "release_url": json["html_url"].as_str().unwrap_or(""),
         "release_notes": json["body"].as_str().unwrap_or(""),
+        "download_url": download_url,
+        "download_size": download_size,
     }))
+}
+
+#[tauri::command]
+async fn download_and_install_update(download_url: String) -> Result<String, String> {
+    if download_url.is_empty() {
+        return Err("No download URL provided".to_string());
+    }
+
+    // Determine file extension from URL
+    let ext = if download_url.ends_with(".msi") {
+        ".msi"
+    } else {
+        ".exe"
+    };
+
+    // Download to temp directory
+    let temp_dir = std::env::temp_dir();
+    let installer_path = temp_dir.join(format!("GameVault_update{}", ext));
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&download_url)
+        .header("User-Agent", "GameVault")
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Download failed with status: {}", resp.status()));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read download: {}", e))?;
+
+    std::fs::write(&installer_path, &bytes)
+        .map_err(|e| format!("Failed to save installer: {}", e))?;
+
+    // Launch the installer
+    let installer_str = installer_path.to_string_lossy().to_string();
+
+    if ext == ".msi" {
+        std::process::Command::new("msiexec")
+            .args(["/i", &installer_str, "/passive"])
+            .spawn()
+            .map_err(|e| format!("Failed to launch installer: {}", e))?;
+    } else {
+        std::process::Command::new(&installer_str)
+            .arg("/S") // NSIS silent install flag
+            .spawn()
+            .map_err(|e| format!("Failed to launch installer: {}", e))?;
+    }
+
+    Ok(installer_str)
 }
 
 #[tauri::command]

@@ -6,8 +6,9 @@ import React, {
   useRef,
   useState,
 } from "react";
-import type { Game, AppSettings } from "@/types";
+import type { Game, GameEntry, AppSettings } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { sendNotification } from "@tauri-apps/plugin-notification";
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
@@ -71,6 +72,7 @@ const defaultSettings: AppSettings = {
   notify_backup_complete: true,
   launch_on_startup: true,
   minimize_to_tray: true,
+  overlay_opacity: 92,
 };
 
 const BOOLEAN_KEYS: Set<string> = new Set([
@@ -87,6 +89,7 @@ const BOOLEAN_KEYS: Set<string> = new Set([
 const NUMBER_KEYS: Set<string> = new Set([
   "auto_backup_interval_minutes",
   "max_backups_per_game",
+  "overlay_opacity",
 ]);
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -208,6 +211,110 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     loadGames();
   }, []);
+
+  // ── Background sync: fetch game database from GitHub and merge new entries ──
+  useEffect(() => {
+    if (isLoading) return; // wait until local games are loaded first
+    const REMOTE_URL =
+      "https://raw.githubusercontent.com/Kawai-Senpai/GameVault/main/src/data/games.json";
+
+    const syncGameDatabase = async () => {
+      try {
+        const resp = await tauriFetch(REMOTE_URL, {
+          method: "GET",
+          headers: { "Cache-Control": "no-cache" },
+        });
+        if (!resp.ok) return; // silent fail — not critical
+
+        const data = (await resp.json()) as { games?: GameEntry[] };
+        if (!data?.games?.length) return;
+
+        const db = await import("@tauri-apps/plugin-sql");
+        const conn = await db.default.load("sqlite:gamevault.db");
+
+        // Get all existing game IDs from DB
+        const existing = (await conn.select("SELECT id FROM games")) as Array<{ id: string }>;
+        const existingIds = new Set(existing.map((r) => r.id));
+
+        let added = 0;
+        for (const entry of data.games) {
+          if (existingIds.has(entry.id)) {
+            // Update cover_url, header_url, and save_paths for existing entries
+            // (so new URLs and paths propagate without requiring an app update)
+            await conn.execute(
+              `UPDATE games SET
+                cover_url = COALESCE(NULLIF($1, ''), cover_url),
+                header_url = COALESCE(NULLIF($2, ''), header_url),
+                save_paths = CASE WHEN save_paths = '[]' THEN $3 ELSE save_paths END,
+                updated_at = datetime('now')
+              WHERE id = $4 AND is_custom = 0`,
+              [
+                entry.cover_url || "",
+                entry.header_url || "",
+                JSON.stringify(entry.save_paths || []),
+                entry.id,
+              ]
+            );
+            continue;
+          }
+
+          // New game entry — insert it
+          await conn.execute(
+            `INSERT INTO games (id, name, developer, steam_appid, cover_url, header_url, save_paths, extensions, notes, is_custom, is_detected, added_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, 0, datetime('now'), datetime('now'))`,
+            [
+              entry.id,
+              entry.name,
+              entry.developer || "",
+              entry.steam_appid || null,
+              entry.cover_url || null,
+              entry.header_url || null,
+              JSON.stringify(entry.save_paths || []),
+              JSON.stringify(entry.extensions || []),
+              entry.notes || "",
+            ]
+          );
+          added += 1;
+        }
+
+        if (added > 0) {
+          // Reload games from DB so UI reflects the new additions
+          const rows = (await conn.select("SELECT * FROM games ORDER BY is_favorite DESC, name ASC")) as Record<string, unknown>[];
+          const mapped: Game[] = rows.map((r) => ({
+            id: r.id as string,
+            name: r.name as string,
+            developer: (r.developer as string) || "",
+            steam_appid: r.steam_appid as string | null,
+            cover_url: r.cover_url as string | null,
+            header_url: r.header_url as string | null,
+            custom_cover_path: r.custom_cover_path as string | null,
+            custom_header_path: r.custom_header_path as string | null,
+            save_paths: JSON.parse((r.save_paths as string) || "[]"),
+            extensions: JSON.parse((r.extensions as string) || "[]"),
+            notes: (r.notes as string) || "",
+            exe_path: r.exe_path as string | null,
+            is_custom: Boolean(r.is_custom),
+            is_detected: Boolean(r.is_detected),
+            is_favorite: Boolean(r.is_favorite),
+            auto_backup_disabled: Boolean(r.auto_backup_disabled),
+            play_count: (r.play_count as number) || 0,
+            total_playtime_seconds: (r.total_playtime_seconds as number) || 0,
+            last_played_at: r.last_played_at as string | null,
+            added_at: r.added_at as string,
+            updated_at: r.updated_at as string,
+          }));
+          setGames(mapped);
+          console.log(`[GameVault] Synced ${added} new game(s) from remote database`);
+        }
+      } catch (err) {
+        // Silent — this is a background enhancement, not critical
+        console.debug("[GameVault] Remote game sync skipped:", err);
+      }
+    };
+
+    syncGameDatabase();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading]);
 
   useEffect(() => {
     if (!settingsLoaded) return;

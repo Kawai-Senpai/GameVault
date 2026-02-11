@@ -5,7 +5,7 @@ import { Toaster } from "sonner";
 
 export default function MainLayout() {
   return (
-    <div className="flex h-screen w-screen min-h-0 flex-col overflow-hidden bg-background">
+    <div className="flex h-screen w-screen min-h-0 flex-col overflow-hidden rounded-lg bg-background border border-border/40">
       <TitleBar />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />

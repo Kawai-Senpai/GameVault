@@ -38,8 +38,10 @@ import {
   EyeOff,
   Search,
   Download,
+  Layers,
 } from "lucide-react";
 import type { AppSettings } from "@/types";
+import { Slider } from "@/components/ui/slider";
 
 export default function Settings() {
   const { settings, updateSetting, games, autoBackupStatus } = useApp();
@@ -47,6 +49,29 @@ export default function Settings() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ imported: number; skipped: number; total: number } | null>(null);
+
+  // Update state
+  const [updateInfo, setUpdateInfo] = useState<{
+    checking: boolean;
+    available: boolean;
+    latestVersion: string;
+    releaseNotes: string;
+    downloadUrl: string;
+    downloadSize: number;
+    downloading: boolean;
+    downloadProgress: string;
+    error: string;
+  }>({
+    checking: false,
+    available: false,
+    latestVersion: "",
+    releaseNotes: "",
+    downloadUrl: "",
+    downloadSize: 0,
+    downloading: false,
+    downloadProgress: "",
+    error: "",
+  });
 
   const handleUpdate = useCallback(
     async (key: keyof AppSettings, value: unknown) => {
@@ -62,6 +87,64 @@ export default function Settings() {
     },
     [updateSetting]
   );
+
+  const handleCheckForUpdates = async () => {
+    setUpdateInfo((prev) => ({ ...prev, checking: true, error: "", available: false }));
+    try {
+      const result = await invoke<{
+        current_version: string;
+        latest_version: string;
+        update_available: boolean;
+        release_url: string;
+        release_notes: string;
+        download_url: string;
+        download_size: number;
+      }>("check_for_updates");
+      setUpdateInfo((prev) => ({
+        ...prev,
+        checking: false,
+        available: result.update_available,
+        latestVersion: result.latest_version,
+        releaseNotes: result.release_notes,
+        downloadUrl: result.download_url,
+        downloadSize: result.download_size,
+      }));
+      if (!result.update_available) {
+        toast.success("You're on the latest version!");
+      }
+    } catch (err) {
+      setUpdateInfo((prev) => ({ ...prev, checking: false, error: `${err}` }));
+      toast.error(`Update check failed: ${err}`);
+    }
+  };
+
+  const handleDownloadAndInstall = async () => {
+    if (!updateInfo.downloadUrl) {
+      toast.error("No download URL available. Please download manually from GitHub.");
+      return;
+    }
+    setUpdateInfo((prev) => ({ ...prev, downloading: true, downloadProgress: "Downloading..." }));
+    try {
+      const installerPath = await invoke<string>("download_and_install_update", {
+        downloadUrl: updateInfo.downloadUrl,
+      });
+      setUpdateInfo((prev) => ({ ...prev, downloadProgress: "Installing..." }));
+      toast.success("Update downloaded! Installing and restarting...");
+      // Give the installer a moment to start, then exit
+      setTimeout(async () => {
+        try {
+          const { getCurrentWindow } = await import("@tauri-apps/api/window");
+          await getCurrentWindow().close();
+        } catch {
+          // Force exit if window close fails
+          await invoke("open_external_url", { url: `file://${installerPath}` }).catch(() => {});
+        }
+      }, 2000);
+    } catch (err) {
+      setUpdateInfo((prev) => ({ ...prev, downloading: false, downloadProgress: "", error: `${err}` }));
+      toast.error(`Update failed: ${err}`);
+    }
+  };
 
   const handlePickDir = async (field: "backup_directory" | "screenshots_directory") => {
     try {
@@ -224,6 +307,39 @@ export default function Settings() {
                       {t.charAt(0).toUpperCase() + t.slice(1)}
                     </Button>
                   ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ── Overlay ──────────────────────────────────────── */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Layers className="size-3.5" /> Overlay
+              </CardTitle>
+              <CardDescription>Configure the in-game overlay appearance</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div>
+                    <Label className="text-[10px]">Overlay Opacity</Label>
+                    <p className="text-[9px] text-muted-foreground">How transparent the overlay is (higher = more opaque)</p>
+                  </div>
+                  <span className="text-[10px] font-mono tabular-nums text-muted-foreground">{settings.overlay_opacity}%</span>
+                </div>
+                <Slider
+                  value={[settings.overlay_opacity]}
+                  onValueChange={([v]) => handleUpdate("overlay_opacity", v)}
+                  min={30}
+                  max={100}
+                  step={1}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-[8px] text-muted-foreground mt-0.5">
+                  <span>Transparent</span>
+                  <span>Opaque</span>
                 </div>
               </div>
             </CardContent>
@@ -614,14 +730,15 @@ export default function Settings() {
             </CardContent>
           </Card>
 
-          {/* ── About ────────────────────────────────────────── */}
+          {/* ── About & Updates ─────────────────────────────── */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Info className="size-3.5" /> About
+                <Info className="size-3.5" /> About & Updates
               </CardTitle>
+              <CardDescription>App version and automatic updates</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
               <div className="space-y-1.5 text-[10px] text-muted-foreground">
                 <div className="flex justify-between">
                   <span>Version</span>
@@ -631,6 +748,72 @@ export default function Settings() {
                   <span>Games in library</span>
                   <span>{games.length}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span>Game database</span>
+                  <span className="text-[9px] text-success">Auto-synced from GitHub</span>
+                </div>
+              </div>
+
+              <div className="border-t border-border/60 pt-3 space-y-2">
+                {!updateInfo.available ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full h-8 text-[10px] gap-1.5"
+                    disabled={updateInfo.checking}
+                    onClick={() => void handleCheckForUpdates()}
+                  >
+                    {updateInfo.checking ? (
+                      <>
+                        <Search className="size-3 animate-pulse" /> Checking for updates...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="size-3" /> Check for Updates
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="rounded-lg bg-primary/5 border border-primary/20 p-2.5">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Download className="size-3 text-primary" />
+                        <span className="text-[10px] font-medium text-primary">
+                          Update Available: v{updateInfo.latestVersion}
+                        </span>
+                      </div>
+                      {updateInfo.releaseNotes && (
+                        <p className="text-[9px] text-muted-foreground line-clamp-3 leading-relaxed">
+                          {updateInfo.releaseNotes}
+                        </p>
+                      )}
+                      {updateInfo.downloadSize > 0 && (
+                        <p className="text-[8px] text-muted-foreground mt-1">
+                          Download size: {(updateInfo.downloadSize / 1024 / 1024).toFixed(1)} MB
+                        </p>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      className="w-full h-8 text-[10px] gap-1.5"
+                      disabled={updateInfo.downloading}
+                      onClick={() => void handleDownloadAndInstall()}
+                    >
+                      {updateInfo.downloading ? (
+                        <>
+                          <Download className="size-3 animate-bounce" /> {updateInfo.downloadProgress}
+                        </>
+                      ) : (
+                        <>
+                          <Download className="size-3" /> Download &amp; Install Update
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+                {updateInfo.error && (
+                  <p className="text-[9px] text-destructive">{updateInfo.error}</p>
+                )}
               </div>
             </CardContent>
           </Card>
