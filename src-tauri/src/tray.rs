@@ -1,7 +1,7 @@
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
 
@@ -42,28 +42,27 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .tooltip("Game Vault")
         .show_menu_on_left_click(false)
-        .on_tray_icon_event(|tray, event| match event {
-            TrayIconEvent::DoubleClick { button, .. } if button == MouseButton::Left => {
+        .on_tray_icon_event(|tray, event| {
+            let show_main = || {
                 let app = tray.app_handle();
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
-            }
-            TrayIconEvent::Click {
-                button,
-                button_state,
-                ..
-            } if button == MouseButton::Left && button_state == MouseButtonState::Down => {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
+            };
+            match event {
+                TrayIconEvent::DoubleClick { .. } => {
+                    show_main();
                 }
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    show_main();
+                }
+                _ => {}
             }
-            _ => {}
         })
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => {
@@ -74,14 +73,16 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "quick_backup" => {
+                // Show the main window first so its JS event loop can process
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.emit("tray-quick-backup", ());
+                    let _ = window.show();
                 }
+                // Use global emit so the event reaches even if window was hidden
+                let _ = app.emit("tray-quick-backup", ());
             }
             "screenshot" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.emit("tray-take-screenshot", ());
-                }
+                // Use global emit
+                let _ = app.emit("tray-take-screenshot", ());
             }
             "overlay" => {
                 if let Some(overlay) = app.get_webview_window("overlay") {

@@ -1,6 +1,7 @@
 mod backup;
 mod games;
 mod keymapper;
+mod perf;
 mod screenshots;
 mod tray;
 
@@ -234,6 +235,52 @@ pub fn run() {
                             "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        // Migration 6: Note reminders (next-session + recurring)
+                        tauri_plugin_sql::Migration {
+                            version: 6,
+                            description: "Add note reminder fields",
+                            sql: r#"
+                                ALTER TABLE game_notes ADD COLUMN reminder_enabled INTEGER DEFAULT 0;
+                                ALTER TABLE game_notes ADD COLUMN remind_next_session INTEGER DEFAULT 0;
+                                ALTER TABLE game_notes ADD COLUMN remind_at TEXT;
+                                ALTER TABLE game_notes ADD COLUMN recurring_days INTEGER;
+                                ALTER TABLE game_notes ADD COLUMN last_reminded_at TEXT;
+                                ALTER TABLE game_notes ADD COLUMN last_shown_at TEXT;
+                                ALTER TABLE game_notes ADD COLUMN is_dismissed INTEGER DEFAULT 0;
+                                CREATE INDEX IF NOT EXISTS idx_game_notes_reminders ON game_notes(game_id, reminder_enabled, is_dismissed);
+                            "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                        // Migration 7: Play sessions + daily aggregation (graphs per day)
+                        tauri_plugin_sql::Migration {
+                            version: 7,
+                            description: "Add playtime session tables",
+                            sql: r#"
+                                CREATE TABLE IF NOT EXISTS play_sessions (
+                                    id TEXT PRIMARY KEY,
+                                    game_id TEXT NOT NULL,
+                                    pid INTEGER,
+                                    exe_path TEXT,
+                                    started_at TEXT NOT NULL,
+                                    ended_at TEXT NOT NULL,
+                                    duration_seconds INTEGER NOT NULL,
+                                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                                    FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+                                );
+
+                                CREATE INDEX IF NOT EXISTS idx_play_sessions_game_id ON play_sessions(game_id);
+
+                                CREATE TABLE IF NOT EXISTS playtime_daily (
+                                    game_id TEXT NOT NULL,
+                                    day TEXT NOT NULL,
+                                    duration_seconds INTEGER NOT NULL DEFAULT 0,
+                                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                                    PRIMARY KEY (game_id, day),
+                                    FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+                                );
+                            "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -292,6 +339,8 @@ pub fn run() {
             keymapper::simulate_key_press,
             keymapper::simulate_key_release,
             keymapper::simulate_key_tap,
+            // Performance
+            perf::get_performance_snapshot,
             // AI commands
             ai_chat,
             // Overlay

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useApp } from "@/contexts/app.context";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -68,8 +68,12 @@ export default function GameDetail() {
   const [backupName, setBackupName] = useState("");
   const [coverChangeOpen, setCoverChangeOpen] = useState(false);
   const [gameNotes, setGameNotes] = useState<GameNote[]>([]);
+  const [playtimeDaily, setPlaytimeDaily] = useState<Array<{ day: string; duration_seconds: number }>>([]);
+  const [isLoadingPlaytime, setIsLoadingPlaytime] = useState(true);
   const [editableExePath, setEditableExePath] = useState("");
   const [editableSavePaths, setEditableSavePaths] = useState("");
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameName, setRenameName] = useState("");
 
   const game = games.find((g) => g.id === gameId);
 
@@ -85,6 +89,31 @@ export default function GameDetail() {
     loadBackups();
     loadScreenshots();
     loadGameNotes();
+    loadPlaytimeDaily();
+  }, [gameId]);
+
+  // Reload playtime graph when total_playtime_seconds changes (e.g. session ends)
+  useEffect(() => {
+    if (!gameId || !game) return;
+    loadPlaytimeDaily();
+  }, [game?.total_playtime_seconds]);
+
+  const loadPlaytimeDaily = useCallback(async () => {
+    if (!gameId) return;
+    setIsLoadingPlaytime(true);
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      const rows = (await conn.select(
+        "SELECT day, duration_seconds FROM playtime_daily WHERE game_id = $1 ORDER BY day DESC LIMIT 32",
+        [gameId]
+      )) as Array<{ day: string; duration_seconds: number }>;
+      setPlaytimeDaily(rows);
+    } catch {
+      setPlaytimeDaily([]);
+    } finally {
+      setIsLoadingPlaytime(false);
+    }
   }, [gameId]);
 
   const loadBackups = useCallback(async () => {
@@ -149,6 +178,18 @@ export default function GameDetail() {
           content: r.content as string,
           color: r.color as string,
           is_pinned: Boolean(r.is_pinned),
+          reminder_enabled: Boolean((r as any).reminder_enabled),
+          remind_next_session: Boolean((r as any).remind_next_session),
+          remind_at: ((r as any).remind_at as string) || null,
+          recurring_days:
+            typeof (r as any).recurring_days === "number"
+              ? ((r as any).recurring_days as number)
+              : (r as any).recurring_days
+                ? parseInt(String((r as any).recurring_days))
+                : null,
+          last_reminded_at: ((r as any).last_reminded_at as string) || null,
+          last_shown_at: ((r as any).last_shown_at as string) || null,
+          is_dismissed: Boolean((r as any).is_dismissed),
           created_at: r.created_at as string,
           updated_at: r.updated_at as string,
         }))
@@ -457,6 +498,36 @@ export default function GameDetail() {
     );
   }
 
+  const formatLocalDay = (d: Date) => {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+
+  const formatDuration = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h <= 0) return `${m}m`;
+    if (m <= 0) return `${h}h`;
+    return `${h}h ${m}m`;
+  };
+
+  const playtimeMap = useMemo(() => {
+    return new Map(playtimeDaily.map((p) => [p.day, p.duration_seconds] as const));
+  }, [playtimeDaily]);
+
+  const playtimeSeries = useMemo(() => {
+    const now = new Date();
+    const days = Array.from({ length: 14 }).map((_, i) => {
+      const d = new Date(now);
+      d.setDate(now.getDate() - (13 - i));
+      const day = formatLocalDay(d);
+      return { day, seconds: playtimeMap.get(day) || 0 };
+    });
+    return days;
+  }, [playtimeMap]);
+
+  const maxDaySeconds = Math.max(1, ...playtimeSeries.map((d: { day: string; seconds: number }) => d.seconds));
+
   const headerSrc = game.custom_header_path || game.header_url;
 
   return (
@@ -561,6 +632,12 @@ export default function GameDetail() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => {
+                  setRenameName(game.name);
+                  setRenameDialogOpen(true);
+                }}>
+                  <Pencil className="size-3" /> Rename Game
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setCoverChangeOpen(true)}>
                   <Palette className="size-3" /> Change Cover/Header
                 </DropdownMenuItem>
@@ -711,6 +788,52 @@ export default function GameDetail() {
                   {game.notes && <InfoRow label="Notes" value={game.notes} />}
                   <InfoRow label="Added" value={formatDate(game.added_at)} />
                   <InfoRow label="Play Count" value={String(game.play_count)} />
+                  <InfoRow label="Total Playtime" value={formatDuration(game.total_playtime_seconds || 0)} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Playtime (Last 14 Days)</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingPlaytime ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-3 w-32" />
+                      <div className="flex items-end gap-1 h-16">
+                        {Array.from({ length: 14 }).map((_, i) => (
+                          <Skeleton key={i} className="w-3 rounded" style={{ height: `${20 + (i % 5) * 8}px` }} />
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-[9px] text-muted-foreground">
+                        Tracks playtime automatically when the game is detected running (even if launched outside GameVault).
+                      </p>
+                      <div className="flex items-end gap-1 h-16">
+                        {playtimeSeries.map((d: { day: string; seconds: number }) => {
+                          const h = Math.max(2, Math.round((d.seconds / maxDaySeconds) * 64));
+                          return (
+                            <div key={d.day} className="flex-1 min-w-0 flex flex-col items-center gap-1">
+                              <div
+                                className={cn(
+                                  "w-full rounded-md",
+                                  d.seconds > 0 ? "bg-primary/40" : "bg-muted"
+                                )}
+                                style={{ height: `${h}px` }}
+                                title={`${d.day}: ${formatDuration(d.seconds)}`}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex justify-between text-[8px] text-muted-foreground">
+                        <span>{playtimeSeries[0]?.day}</span>
+                        <span>{playtimeSeries[playtimeSeries.length - 1]?.day}</span>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -950,6 +1073,74 @@ export default function GameDetail() {
                   <Save className="size-3" /> Create Backup
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Game Dialog */}
+      <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename Game</DialogTitle>
+            <DialogDescription>
+              Set a custom name for this game. This only changes how it appears in GameVault.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={renameName}
+            onChange={(e) => setRenameName(e.target.value)}
+            placeholder="Game name"
+            className="mt-1"
+            maxLength={200}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && renameName.trim()) {
+                (async () => {
+                  try {
+                    const db = await import("@tauri-apps/plugin-sql");
+                    const conn = await db.default.load("sqlite:gamevault.db");
+                    await conn.execute(
+                      "UPDATE games SET name = $1, updated_at = datetime('now') WHERE id = $2",
+                      [renameName.trim(), game.id]
+                    );
+                    setGames((prev) =>
+                      prev.map((g) => (g.id === game.id ? { ...g, name: renameName.trim() } : g))
+                    );
+                    toast.success("Game renamed");
+                    setRenameDialogOpen(false);
+                  } catch (err) {
+                    toast.error(`${err}`);
+                  }
+                })();
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setRenameDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={!renameName.trim() || renameName.trim() === game.name}
+              onClick={async () => {
+                try {
+                  const db = await import("@tauri-apps/plugin-sql");
+                  const conn = await db.default.load("sqlite:gamevault.db");
+                  await conn.execute(
+                    "UPDATE games SET name = $1, updated_at = datetime('now') WHERE id = $2",
+                    [renameName.trim(), game.id]
+                  );
+                  setGames((prev) =>
+                    prev.map((g) => (g.id === game.id ? { ...g, name: renameName.trim() } : g))
+                  );
+                  toast.success("Game renamed");
+                  setRenameDialogOpen(false);
+                } catch (err) {
+                  toast.error(`${err}`);
+                }
+              }}
+            >
+              Rename
             </Button>
           </DialogFooter>
         </DialogContent>

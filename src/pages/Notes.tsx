@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import {
   StickyNote,
@@ -38,6 +39,8 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { GameNote } from "@/types";
+
+const MAX_ACTIVE_REMINDERS_TOTAL = 200;
 
 const NOTE_COLORS = [
   { value: "#6366f1", label: "Indigo", class: "bg-indigo-500" },
@@ -67,6 +70,8 @@ export default function Notes() {
   const [noteContent, setNoteContent] = useState("");
   const [noteColor, setNoteColor] = useState("#6366f1");
   const [noteGameId, setNoteGameId] = useState<string>("");
+  const [remindNextSession, setRemindNextSession] = useState(false);
+  const [recurringDays, setRecurringDays] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Load notes
@@ -86,6 +91,18 @@ export default function Notes() {
           content: r.content as string,
           color: r.color as string,
           is_pinned: Boolean(r.is_pinned),
+          reminder_enabled: Boolean((r as any).reminder_enabled),
+          remind_next_session: Boolean((r as any).remind_next_session),
+          remind_at: ((r as any).remind_at as string) || null,
+          recurring_days:
+            typeof (r as any).recurring_days === "number"
+              ? ((r as any).recurring_days as number)
+              : (r as any).recurring_days
+                ? parseInt(String((r as any).recurring_days))
+                : null,
+          last_reminded_at: ((r as any).last_reminded_at as string) || null,
+          last_shown_at: ((r as any).last_shown_at as string) || null,
+          is_dismissed: Boolean((r as any).is_dismissed),
           created_at: r.created_at as string,
           updated_at: r.updated_at as string,
         }))
@@ -125,6 +142,8 @@ export default function Notes() {
     setNoteContent("");
     setNoteColor("#6366f1");
     setNoteGameId(selectedGameId !== "all" ? selectedGameId : (games[0]?.id || ""));
+    setRemindNextSession(false);
+    setRecurringDays(null);
     setIsDialogOpen(true);
   };
 
@@ -135,8 +154,14 @@ export default function Notes() {
     setNoteContent(note.content);
     setNoteColor(note.color);
     setNoteGameId(note.game_id);
+    setRemindNextSession(Boolean(note.remind_next_session));
+    setRecurringDays(note.recurring_days ?? null);
     setIsDialogOpen(true);
   };
+
+  const activeReminderCount = useMemo(() => {
+    return notes.filter((n) => n.reminder_enabled && !n.is_dismissed).length;
+  }, [notes]);
 
   // Save note
   const handleSave = async () => {
@@ -149,24 +174,57 @@ export default function Notes() {
       return;
     }
 
+    // Enforce a hard cap on active reminders (prevents 1000+ alarm spam)
+    const willEnableReminder = remindNextSession || recurringDays !== null;
+    const isCurrentlyActiveReminder = editingNote ? (editingNote.reminder_enabled && !editingNote.is_dismissed) : false;
+    const wouldIncreaseCount = willEnableReminder && !isCurrentlyActiveReminder;
+    if (wouldIncreaseCount && activeReminderCount >= MAX_ACTIVE_REMINDERS_TOTAL) {
+      toast.error(`Reminder limit reached (${MAX_ACTIVE_REMINDERS_TOTAL}). Dismiss some reminders first.`);
+      return;
+    }
+
     setIsSaving(true);
     try {
       const db = await import("@tauri-apps/plugin-sql");
       const conn = await db.default.load("sqlite:gamevault.db");
 
+      const reminderEnabled = willEnableReminder ? 1 : 0;
+      const nextSession = remindNextSession ? 1 : 0;
+      const recurring = recurringDays !== null ? recurringDays : null;
+
       if (editingNote) {
         // Update
         await conn.execute(
-          `UPDATE game_notes SET title = $1, content = $2, color = $3, game_id = $4, updated_at = datetime('now') WHERE id = $5`,
-          [noteTitle.trim(), noteContent, noteColor, noteGameId, editingNote.id]
+          `UPDATE game_notes SET
+            title = $1,
+            content = $2,
+            color = $3,
+            game_id = $4,
+            reminder_enabled = $5,
+            remind_next_session = $6,
+            recurring_days = $7,
+            is_dismissed = CASE WHEN $5 = 0 THEN 0 ELSE is_dismissed END,
+            updated_at = datetime('now')
+           WHERE id = $8`,
+          [
+            noteTitle.trim(),
+            noteContent,
+            noteColor,
+            noteGameId,
+            reminderEnabled,
+            nextSession,
+            recurring,
+            editingNote.id,
+          ]
         );
         toast.success("Note updated");
       } else {
         // Create
         const id = crypto.randomUUID();
         await conn.execute(
-          `INSERT INTO game_notes (id, game_id, title, content, color) VALUES ($1, $2, $3, $4, $5)`,
-          [id, noteGameId, noteTitle.trim(), noteContent, noteColor]
+          `INSERT INTO game_notes (id, game_id, title, content, color, reminder_enabled, remind_next_session, recurring_days)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [id, noteGameId, noteTitle.trim(), noteContent, noteColor, reminderEnabled, nextSession, recurring]
         );
         toast.success("Note created");
       }
@@ -398,6 +456,77 @@ export default function Notes() {
                 ))}
               </div>
             </div>
+
+            {/* Reminders */}
+            <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <Label className="text-[10px] flex items-center gap-1">
+                    <Clock className="size-3" /> Remind Next Session
+                  </Label>
+                  <p className="text-[9px] text-muted-foreground leading-snug">
+                    Shows an overlay reminder the next time this game is detected running
+                  </p>
+                </div>
+                <Switch
+                  checked={remindNextSession}
+                  onCheckedChange={(v) => setRemindNextSession(v)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <Label className="text-[10px]">Recurring Reminder</Label>
+                  <p className="text-[9px] text-muted-foreground leading-snug">
+                    Repeat on a cadence (still only triggers when the game is running)
+                  </p>
+                </div>
+                <Select
+                  value={recurringDays === null ? "none" : String(recurringDays)}
+                  onValueChange={(v) => {
+                    if (v === "none") return setRecurringDays(null);
+                    if (v === "custom") return setRecurringDays(3);
+                    const parsed = parseInt(v);
+                    setRecurringDays(Number.isFinite(parsed) ? parsed : null);
+                  }}
+                >
+                  <SelectTrigger className="h-7 w-40 text-[10px]">
+                    <SelectValue placeholder="Off" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Off</SelectItem>
+                    <SelectItem value="1">Daily</SelectItem>
+                    <SelectItem value="7">Weekly</SelectItem>
+                    <SelectItem value="30">Monthly</SelectItem>
+                    <SelectItem value="custom">Custom…</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {recurringDays !== null && ![1, 7, 30].includes(recurringDays) && (
+                <div className="flex items-center justify-between gap-3">
+                  <Label className="text-[10px] text-muted-foreground">Every (days)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={recurringDays}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value) || 1;
+                      setRecurringDays(Math.max(1, Math.min(365, v)));
+                    }}
+                    className="h-7 w-24 text-[10px]"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-[8px] text-muted-foreground">
+                <span>Active reminders</span>
+                <span className="font-mono tabular-nums">
+                  {activeReminderCount}/{MAX_ACTIVE_REMINDERS_TOTAL}
+                </span>
+              </div>
+            </div>
           </div>
 
           <DialogFooter>
@@ -445,6 +574,16 @@ function NoteCard({ note, gameName, onEdit, onTogglePin, onDelete }: NoteCardPro
               <Badge variant="outline" className="text-[7px] px-1 py-0 gap-0.5">
                 <Gamepad2 className="size-2" /> {gameName}
               </Badge>
+              {note.reminder_enabled && !note.is_dismissed && (
+                <Badge variant="secondary" className="text-[7px] px-1 py-0 gap-0.5">
+                  <Clock className="size-2" />
+                  {note.remind_next_session
+                    ? "Next session"
+                    : note.recurring_days
+                      ? `Every ${note.recurring_days}d`
+                      : "Reminder"}
+                </Badge>
+              )}
             </div>
           </div>
 

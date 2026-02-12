@@ -49,5 +49,5 @@ windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_UI_Input_KeyboardAndMouse",
 ] }
-winapi = { version = "0.3", features = ["winuser"] }
+winapi = { version = "0.3", features = ["winuser", "pdh"] }
 winreg = "0.52"

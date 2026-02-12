@@ -8,6 +8,8 @@ import { Pin, PinOff, Plus, Trash2, X, Check } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { GameNote } from "@/types";
 
+const MAX_ACTIVE_REMINDERS_TOTAL = 200;
+
 const NOTE_COLORS = [
   "#6366f1", "#ec4899", "#f59e0b", "#10b981", "#3b82f6",
   "#8b5cf6", "#ef4444", "#14b8a6", "#f97316", "#64748b",
@@ -25,6 +27,8 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
   const [editTitle, setEditTitle] = useState("");
   const [editContent, setEditContent] = useState("");
   const [editColor, setEditColor] = useState(NOTE_COLORS[0]);
+  const [editRemindNextSession, setEditRemindNextSession] = useState(false);
+  const [editRecurringDays, setEditRecurringDays] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   const loadNotes = useCallback(async () => {
@@ -44,6 +48,18 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
           content: (r.content as string) || "",
           color: (r.color as string) || "#6366f1",
           is_pinned: Boolean(r.is_pinned),
+          reminder_enabled: Boolean((r as any).reminder_enabled),
+          remind_next_session: Boolean((r as any).remind_next_session),
+          remind_at: ((r as any).remind_at as string) || null,
+          recurring_days:
+            typeof (r as any).recurring_days === "number"
+              ? ((r as any).recurring_days as number)
+              : (r as any).recurring_days
+                ? parseInt(String((r as any).recurring_days))
+                : null,
+          last_reminded_at: ((r as any).last_reminded_at as string) || null,
+          last_shown_at: ((r as any).last_shown_at as string) || null,
+          is_dismissed: Boolean((r as any).is_dismissed),
           created_at: r.created_at as string,
           updated_at: r.updated_at as string,
         }))
@@ -65,15 +81,38 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
     try {
       const db = await import("@tauri-apps/plugin-sql");
       const conn = await db.default.load("sqlite:gamevault.db");
+
+      const willEnableReminder = editRemindNextSession || editRecurringDays !== null;
+      if (willEnableReminder) {
+        const rows = (await conn.select(
+          "SELECT COUNT(*) as c FROM game_notes WHERE reminder_enabled = 1 AND is_dismissed = 0"
+        )) as Array<{ c: number }>;
+        const count = rows[0]?.c || 0;
+        if (count >= MAX_ACTIVE_REMINDERS_TOTAL) {
+          return toast.error(`Reminder limit reached (${MAX_ACTIVE_REMINDERS_TOTAL})`);
+        }
+      }
+
       const id = crypto.randomUUID();
       await conn.execute(
-        "INSERT INTO game_notes (id, game_id, title, content, color) VALUES ($1, $2, $3, $4, $5)",
-        [id, gameId, editTitle.trim(), editContent.trim(), editColor]
+        "INSERT INTO game_notes (id, game_id, title, content, color, reminder_enabled, remind_next_session, recurring_days) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        [
+          id,
+          gameId,
+          editTitle.trim(),
+          editContent.trim(),
+          editColor,
+          willEnableReminder ? 1 : 0,
+          editRemindNextSession ? 1 : 0,
+          editRecurringDays,
+        ]
       );
       setIsCreating(false);
       setEditTitle("");
       setEditContent("");
       setEditColor(NOTE_COLORS[0]);
+      setEditRemindNextSession(false);
+      setEditRecurringDays(null);
       void loadNotes();
       toast.success("Note created");
     } catch (err) {
@@ -86,13 +125,37 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
     try {
       const db = await import("@tauri-apps/plugin-sql");
       const conn = await db.default.load("sqlite:gamevault.db");
+
+      const willEnableReminder = editRemindNextSession || editRecurringDays !== null;
+      // If switching from no-reminder -> reminder, enforce cap
+      if (willEnableReminder) {
+        const rows = (await conn.select(
+          "SELECT COUNT(*) as c FROM game_notes WHERE reminder_enabled = 1 AND is_dismissed = 0 AND id != $1",
+          [editingId]
+        )) as Array<{ c: number }>;
+        const count = rows[0]?.c || 0;
+        if (count >= MAX_ACTIVE_REMINDERS_TOTAL) {
+          return toast.error(`Reminder limit reached (${MAX_ACTIVE_REMINDERS_TOTAL})`);
+        }
+      }
+
       await conn.execute(
-        "UPDATE game_notes SET title = $1, content = $2, color = $3, updated_at = datetime('now') WHERE id = $4",
-        [editTitle.trim(), editContent.trim(), editColor, editingId]
+        "UPDATE game_notes SET title = $1, content = $2, color = $3, reminder_enabled = $4, remind_next_session = $5, recurring_days = $6, updated_at = datetime('now') WHERE id = $7",
+        [
+          editTitle.trim(),
+          editContent.trim(),
+          editColor,
+          willEnableReminder ? 1 : 0,
+          editRemindNextSession ? 1 : 0,
+          editRecurringDays,
+          editingId,
+        ]
       );
       setEditingId(null);
       setEditTitle("");
       setEditContent("");
+      setEditRemindNextSession(false);
+      setEditRecurringDays(null);
       void loadNotes();
       toast.success("Note updated");
     } catch (err) {
@@ -131,6 +194,8 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
     setEditTitle(note.title);
     setEditContent(note.content);
     setEditColor(note.color);
+    setEditRemindNextSession(Boolean(note.remind_next_session));
+    setEditRecurringDays(note.recurring_days ?? null);
     setIsCreating(false);
   };
 
@@ -140,6 +205,8 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
     setEditTitle("");
     setEditContent("");
     setEditColor(NOTE_COLORS[0]);
+    setEditRemindNextSession(false);
+    setEditRecurringDays(null);
   };
 
   const cancelEdit = () => {
@@ -147,6 +214,8 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
     setEditingId(null);
     setEditTitle("");
     setEditContent("");
+    setEditRemindNextSession(false);
+    setEditRecurringDays(null);
   };
 
   // Editing/Creating form
@@ -189,6 +258,75 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
               onClick={() => setEditColor(c)}
             />
           ))}
+        </div>
+
+        {/* Reminders */}
+        <div className="rounded-lg border border-white/10 bg-white/5 p-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[9px] text-white/60">Remind next session</p>
+            <button
+              className={cn(
+                "h-5 w-9 rounded-full border transition-colors",
+                editRemindNextSession ? "bg-emerald-500/30 border-emerald-500/40" : "bg-white/5 border-white/10"
+              )}
+              onClick={() => setEditRemindNextSession((p) => !p)}
+            >
+              <span
+                className={cn(
+                  "block size-4 rounded-full bg-white/70 transition-transform",
+                  editRemindNextSession ? "translate-x-4" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[9px] text-white/60">Recurring</p>
+            <div className="flex items-center gap-1">
+              <button
+                className={cn(
+                  "h-6 px-2 rounded border text-[8px]",
+                  editRecurringDays === null ? "border-white/20 bg-white/10 text-white" : "border-white/10 bg-white/5 text-white/60"
+                )}
+                onClick={() => setEditRecurringDays(null)}
+              >
+                Off
+              </button>
+              <button
+                className={cn(
+                  "h-6 px-2 rounded border text-[8px]",
+                  editRecurringDays === 1 ? "border-white/20 bg-white/10 text-white" : "border-white/10 bg-white/5 text-white/60"
+                )}
+                onClick={() => setEditRecurringDays(1)}
+              >
+                Daily
+              </button>
+              <button
+                className={cn(
+                  "h-6 px-2 rounded border text-[8px]",
+                  editRecurringDays === 7 ? "border-white/20 bg-white/10 text-white" : "border-white/10 bg-white/5 text-white/60"
+                )}
+                onClick={() => setEditRecurringDays(7)}
+              >
+                Weekly
+              </button>
+            </div>
+          </div>
+          {editRecurringDays !== null && ![1, 7].includes(editRecurringDays) && (
+            <div className="flex items-center justify-between">
+              <p className="text-[9px] text-white/60">Every (days)</p>
+              <Input
+                type="number"
+                min={1}
+                max={365}
+                value={editRecurringDays}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value) || 1;
+                  setEditRecurringDays(Math.max(1, Math.min(365, v)));
+                }}
+                className="h-6 w-20 text-[9px] bg-white/5 border-white/10 text-white"
+              />
+            </div>
+          )}
         </div>
         <Button
           size="sm"

@@ -14,6 +14,19 @@ import { listen } from "@tauri-apps/api/event";
 import { toast } from "sonner";
 import { useKeyEngine } from "@/lib/useKeyEngine";
 
+const normalizePath = (v: string | null | undefined) =>
+  (v || "").replace(/\//g, "\\").toLowerCase().trim();
+
+const toLocalDay = (d: Date) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const PLAYTIME_POLL_MS = 3000;
+const PLAYTIME_END_GRACE_MS = 15000;
+const PLAYTIME_FLUSH_MS = 30000; // Flush playtime to DB every 30s while game is running
+const MIN_SESSION_SECONDS = 5;
+
 export interface AutoBackupStatus {
   running: boolean;
   current: number;
@@ -160,6 +173,273 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Register global shortcuts for active key mappings and macros
   useKeyEngine(activeKeyMappings, activeMacros, settingsLoaded && !isOverlay);
+
+  // ── Background game session detection (external launches) ─────────────────
+  // Powers:
+  // - Playtime tracking (per day + totals)
+  // - Notes reminders ("next session" / recurring) when game is detected running
+  const dbConnRef = useRef<any>(null);
+  const sessionsRef = useRef<
+    Map<
+      string,
+      {
+        pid: number;
+        exe_path: string;
+        started_at_ms: number;
+        last_seen_ms: number;
+        last_flushed_ms: number;
+        flushed_seconds: number; // total seconds already written to DB for this session
+        reminder_checked: boolean;
+      }
+    >
+  >(new Map());
+
+  const ensureDbConn = useCallback(async () => {
+    if (dbConnRef.current) return dbConnRef.current;
+    const db = await import("@tauri-apps/plugin-sql");
+    dbConnRef.current = await db.default.load("sqlite:gamevault.db");
+    return dbConnRef.current;
+  }, []);
+
+  useEffect(() => {
+    if (!settingsLoaded || isOverlay) return;
+    if (!games.length) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const windows = await invoke<
+          Array<{ pid: number; process_name: string; exe_path: string; title: string; is_foreground: boolean }>
+        >("list_running_windows");
+        const now = Date.now();
+
+        // Build lookups of exe_path -> window and title/process_name -> window
+        const exeToPid = new Map<string, { pid: number; exe_path: string; is_foreground: boolean }>();
+        for (const w of windows) {
+          const exe = normalizePath(w.exe_path);
+          if (!exe) continue;
+          const existing = exeToPid.get(exe);
+          if (!existing || (!existing.is_foreground && w.is_foreground)) {
+            exeToPid.set(exe, { pid: w.pid, exe_path: exe, is_foreground: w.is_foreground });
+          }
+        }
+
+        // Match games to running windows
+        // Priority 1: exact exe_path match
+        // Priority 2: window title or process name contains the game name (fuzzy)
+        const seenGameIds = new Set<string>();
+        for (const game of games) {
+          let matchedWindow: { pid: number; exe_path: string; is_foreground: boolean } | null = null;
+
+          // Try exe_path match first (most accurate)
+          const exe = normalizePath(game.exe_path);
+          if (exe) {
+            const m = exeToPid.get(exe);
+            if (m) matchedWindow = m;
+          }
+
+          // Fallback: fuzzy match by game name in window title or process name
+          if (!matchedWindow && game.name.length >= 3) {
+            const gameLower = game.name.toLowerCase();
+            for (const w of windows) {
+              const titleLower = (w.title || "").toLowerCase();
+              const processLower = (w.process_name || "").toLowerCase();
+              if (titleLower.includes(gameLower) || processLower.includes(gameLower)) {
+                matchedWindow = { pid: w.pid, exe_path: normalizePath(w.exe_path), is_foreground: w.is_foreground };
+                break;
+              }
+            }
+          }
+
+          if (!matchedWindow) continue;
+          seenGameIds.add(game.id);
+
+          const existing = sessionsRef.current.get(game.id);
+          if (!existing) {
+            sessionsRef.current.set(game.id, {
+              pid: matchedWindow.pid,
+              exe_path: matchedWindow.exe_path,
+              started_at_ms: now,
+              last_seen_ms: now,
+              last_flushed_ms: now,
+              flushed_seconds: 0,
+              reminder_checked: false,
+            });
+
+            // Update game metadata immediately (play_count + last_played_at)
+            try {
+              const conn = await ensureDbConn();
+              await conn.execute(
+                "UPDATE games SET play_count = play_count + 1, last_played_at = datetime('now'), updated_at = datetime('now') WHERE id = $1",
+                [game.id]
+              );
+            } catch {
+              // non-fatal
+            }
+          } else {
+            sessionsRef.current.set(game.id, {
+              ...existing,
+              pid: matchedWindow.pid,
+              last_seen_ms: now,
+            });
+          }
+        }
+
+        // Intermediate flush: write accumulated playtime every PLAYTIME_FLUSH_MS while game runs
+        for (const [gameId, session] of sessionsRef.current.entries()) {
+          if (!seenGameIds.has(gameId)) continue; // will be handled by session-end below
+          if (now - session.last_flushed_ms < PLAYTIME_FLUSH_MS) continue;
+
+          const totalElapsed = Math.round((now - session.started_at_ms) / 1000);
+          const delta = totalElapsed - session.flushed_seconds;
+          if (delta < 1) continue;
+
+          try {
+            const conn = await ensureDbConn();
+            const day = toLocalDay(new Date(now));
+
+            await conn.execute(
+              "INSERT INTO playtime_daily (game_id, day, duration_seconds, updated_at) VALUES ($1,$2,$3, datetime('now')) ON CONFLICT(game_id, day) DO UPDATE SET duration_seconds = duration_seconds + excluded.duration_seconds, updated_at = datetime('now')",
+              [gameId, day, delta]
+            );
+            await conn.execute(
+              "UPDATE games SET total_playtime_seconds = total_playtime_seconds + $1, last_played_at = datetime('now'), updated_at = datetime('now') WHERE id = $2",
+              [delta, gameId]
+            );
+
+            // Update React state
+            setGames((prev) =>
+              prev.map((g) =>
+                g.id === gameId
+                  ? { ...g, total_playtime_seconds: (g.total_playtime_seconds || 0) + delta, last_played_at: new Date(now).toISOString() }
+                  : g
+              )
+            );
+
+            sessionsRef.current.set(gameId, {
+              ...session,
+              last_flushed_ms: now,
+              flushed_seconds: totalElapsed,
+            });
+          } catch {
+            // non-fatal
+          }
+        }
+
+        // End sessions that have not been seen recently
+        for (const [gameId, session] of sessionsRef.current.entries()) {
+          if (seenGameIds.has(gameId)) continue;
+          if (now - session.last_seen_ms < PLAYTIME_END_GRACE_MS) continue;
+
+          const durationSeconds = Math.round((now - session.started_at_ms) / 1000);
+          const remainingSeconds = durationSeconds - session.flushed_seconds; // only write unflushed portion
+          sessionsRef.current.delete(gameId);
+
+          if (durationSeconds < MIN_SESSION_SECONDS) continue;
+
+          try {
+            const conn = await ensureDbConn();
+            const sessionId = crypto.randomUUID();
+            const startedAtIso = new Date(session.started_at_ms).toISOString();
+            const endedAtIso = new Date(now).toISOString();
+            const day = toLocalDay(new Date(now));
+
+            // Write the full session record (for history)
+            await conn.execute(
+              "INSERT INTO play_sessions (id, game_id, pid, exe_path, started_at, ended_at, duration_seconds) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+              [
+                sessionId,
+                gameId,
+                session.pid,
+                session.exe_path,
+                startedAtIso,
+                endedAtIso,
+                durationSeconds,
+              ]
+            );
+
+            // Only write the remaining unflushed time to daily + total
+            if (remainingSeconds > 0) {
+              await conn.execute(
+                "INSERT INTO playtime_daily (game_id, day, duration_seconds, updated_at) VALUES ($1,$2,$3, datetime('now')) ON CONFLICT(game_id, day) DO UPDATE SET duration_seconds = duration_seconds + excluded.duration_seconds, updated_at = datetime('now')",
+                [gameId, day, remainingSeconds]
+              );
+
+              await conn.execute(
+                "UPDATE games SET total_playtime_seconds = total_playtime_seconds + $1, updated_at = datetime('now') WHERE id = $2",
+                [remainingSeconds, gameId]
+              );
+
+              // Update React state with only the remaining delta
+              setGames((prev) =>
+                prev.map((g) =>
+                  g.id === gameId
+                    ? {
+                        ...g,
+                        total_playtime_seconds: (g.total_playtime_seconds || 0) + remainingSeconds,
+                        last_played_at: endedAtIso,
+                      }
+                    : g
+                )
+              );
+            }
+          } catch (err) {
+            console.error("Failed to persist play session:", err);
+          }
+        }
+
+        // Reminder checks (run once per session start)
+        for (const [gameId, session] of sessionsRef.current.entries()) {
+          if (session.reminder_checked) continue;
+          session.reminder_checked = true;
+          sessionsRef.current.set(gameId, session);
+
+          try {
+            const conn = await ensureDbConn();
+            const due = (await conn.select(
+              `SELECT id, title FROM game_notes
+               WHERE game_id = $1 AND reminder_enabled = 1 AND is_dismissed = 0
+                 AND (
+                   remind_next_session = 1
+                   OR (
+                     recurring_days IS NOT NULL
+                     AND (last_reminded_at IS NULL OR (julianday('now') - julianday(last_reminded_at)) >= recurring_days)
+                   )
+                 )
+               ORDER BY updated_at DESC
+               LIMIT 5`,
+              [gameId]
+            )) as Array<{ id: string; title: string }>;
+
+            if (due.length > 0 && settings.notifications_enabled) {
+              const gameName = games.find((g) => g.id === gameId)?.name || "Game";
+              try {
+                sendNotification({
+                  title: `Reminder · ${gameName}`,
+                  body: due.map((n) => `• ${n.title}`).join("\n"),
+                });
+              } catch {
+                // ignore
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+      } catch {
+        // silent
+      }
+    };
+
+    const timer = window.setInterval(poll, PLAYTIME_POLL_MS);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [ensureDbConn, games, isOverlay, settings.notifications_enabled, settingsLoaded]);
 
   const selectedGame = games.find((g) => g.id === selectedGameId) || null;
 

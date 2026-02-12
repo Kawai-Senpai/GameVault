@@ -26,6 +26,7 @@ import {
   Sparkles,
   FolderOpen,
   StickyNote,
+  Activity,
 } from "lucide-react";
 import { cn, truncateText } from "@/lib/utils";
 import GameCover from "@/components/GameCover";
@@ -59,6 +60,7 @@ export default function Sidebar() {
     { path: "/screenshots", label: "Screenshots", icon: <Camera className="size-3.5" /> },
     { path: "/key-mapper", label: "Key Mapper", icon: <Keyboard className="size-3.5" /> },
     { path: "/macros", label: "Macros", icon: <Zap className="size-3.5" /> },
+    { path: "/performance", label: "Performance", icon: <Activity className="size-3.5" /> },
     { path: "/ai-chat", label: "AI Chat", icon: <Sparkles className="size-3.5" />, badge: "new" },
     { path: "/notes", label: "Notes", icon: <StickyNote className="size-3.5" /> },
     { path: "/shortcuts", label: "Shortcuts", icon: <Gamepad2 className="size-3.5" /> },

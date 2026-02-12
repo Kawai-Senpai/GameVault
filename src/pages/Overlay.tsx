@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import {
+  Activity,
   AlertTriangle,
   Archive,
   Camera,
@@ -27,13 +28,14 @@ import {
   X,
 } from "lucide-react";
 import { cn, formatBytes, formatRelativeTime } from "@/lib/utils";
-import type { Backup, Game } from "@/types";
+import type { Backup, Game, GameNote } from "@/types";
 
 import OverlayChat from "@/components/overlay/OverlayChat";
 import OverlayNotes from "@/components/overlay/OverlayNotes";
 import OverlayMacros from "@/components/overlay/OverlayMacros";
 import OverlayArcade from "@/components/overlay/OverlayArcade";
 import OverlaySearch from "@/components/overlay/OverlaySearch";
+import PerformancePanel from "@/components/PerformancePanel";
 
 /* ─── Helpers ──────────────────────────────────────────────── */
 
@@ -54,7 +56,7 @@ const slugify = (v: string) =>
 const STRIP_HEIGHT = 54;
 const EXPANDED_HEIGHT = 480;
 
-type OverlayTab = "ops" | "notes" | "macros" | "ai" | "search" | "arcade";
+type OverlayTab = "ops" | "notes" | "macros" | "ai" | "search" | "arcade" | "perf";
 
 /* ─── Component ────────────────────────────────────────────── */
 
@@ -74,6 +76,24 @@ export default function Overlay() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [overlayWizard, setOverlayWizard] = useState<null | "game" | "screenshot-dir" | "backup-dir" | "save-paths">(null);
   const [successCard, setSuccessCard] = useState<{ action: string; info: string } | null>(null);
+
+  // Reminder popup (notes alarms)
+  const [dueReminders, setDueReminders] = useState<GameNote[]>([]);
+  const [reminderHidden, setReminderHidden] = useState(false);
+
+  // Live session timer — shows how long current game has been running
+  const [sessionStartMs, setSessionStartMs] = useState<number | null>(null);
+  const [sessionElapsed, setSessionElapsed] = useState(0);
+  const prevMatchedGameId = useRef<string | null>(null);
+
+  const formatSessionTime = (secs: number) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
 
   // Make body/html transparent for overlay window (rounded corners)
   useEffect(() => {
@@ -126,6 +146,137 @@ export default function Overlay() {
     () => findGameByExe(selectedWindow?.exe_path),
     [findGameByExe, selectedWindow?.exe_path]
   );
+
+  // Track current session start when a game is detected
+  useEffect(() => {
+    const currentId = selectedGame?.id || matchedGame?.id || null;
+    if (currentId && currentId !== prevMatchedGameId.current) {
+      setSessionStartMs(Date.now());
+      setSessionElapsed(0);
+    } else if (!currentId) {
+      setSessionStartMs(null);
+      setSessionElapsed(0);
+    }
+    prevMatchedGameId.current = currentId;
+  }, [selectedGame?.id, matchedGame?.id]);
+
+  // Tick session timer every second
+  useEffect(() => {
+    if (!sessionStartMs) return;
+    const t = window.setInterval(() => {
+      setSessionElapsed(Math.floor((Date.now() - sessionStartMs) / 1000));
+    }, 1000);
+    return () => window.clearInterval(t);
+  }, [sessionStartMs]);
+
+  // Fetch due reminders when the matched game changes
+  useEffect(() => {
+    setReminderHidden(false);
+    if (!matchedGame?.id) {
+      setDueReminders([]);
+      return;
+    }
+
+    (async () => {
+      try {
+        const db = await import("@tauri-apps/plugin-sql");
+        const conn = await db.default.load("sqlite:gamevault.db");
+
+        const rows = (await conn.select(
+          `SELECT * FROM game_notes
+           WHERE game_id = $1 AND reminder_enabled = 1 AND is_dismissed = 0
+             AND (
+               remind_next_session = 1
+               OR (
+                 recurring_days IS NOT NULL
+                 AND (last_reminded_at IS NULL OR (julianday('now') - julianday(last_reminded_at)) >= recurring_days)
+               )
+             )
+           ORDER BY is_pinned DESC, updated_at DESC
+           LIMIT 6`,
+          [matchedGame.id]
+        )) as Array<Record<string, unknown>>;
+
+        const mapped: GameNote[] = rows.map((r) => ({
+          id: r.id as string,
+          game_id: r.game_id as string,
+          title: (r.title as string) || "Untitled",
+          content: (r.content as string) || "",
+          color: (r.color as string) || "#6366f1",
+          is_pinned: Boolean(r.is_pinned),
+          reminder_enabled: Boolean((r as any).reminder_enabled),
+          remind_next_session: Boolean((r as any).remind_next_session),
+          remind_at: ((r as any).remind_at as string) || null,
+          recurring_days:
+            typeof (r as any).recurring_days === "number"
+              ? ((r as any).recurring_days as number)
+              : (r as any).recurring_days
+                ? parseInt(String((r as any).recurring_days))
+                : null,
+          last_reminded_at: ((r as any).last_reminded_at as string) || null,
+          last_shown_at: ((r as any).last_shown_at as string) || null,
+          is_dismissed: Boolean((r as any).is_dismissed),
+          created_at: r.created_at as string,
+          updated_at: r.updated_at as string,
+        }));
+
+        setDueReminders(mapped);
+
+        // Mark “due” reminders as shown so they don't spam inside the same session
+        if (mapped.length > 0) {
+          const ids = mapped.map((n) => n.id);
+          const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
+          await conn.execute(
+            `UPDATE game_notes
+             SET
+               last_shown_at = datetime('now'),
+               -- one-shot next-session reminders clear themselves on show
+               remind_next_session = CASE WHEN remind_next_session = 1 THEN 0 ELSE remind_next_session END,
+               -- recurring reminders advance their last_reminded_at on show
+               last_reminded_at = CASE
+                 WHEN recurring_days IS NOT NULL AND (last_reminded_at IS NULL OR (julianday('now') - julianday(last_reminded_at)) >= recurring_days)
+                   THEN datetime('now')
+                 ELSE last_reminded_at
+               END
+             WHERE id IN (${placeholders})`,
+            ids
+          );
+        }
+      } catch {
+        setDueReminders([]);
+      }
+    })();
+  }, [matchedGame?.id]);
+
+  const dismissReminderForever = useCallback(async (noteId: string) => {
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      await conn.execute(
+        "UPDATE game_notes SET reminder_enabled = 0, remind_next_session = 0, recurring_days = NULL, is_dismissed = 1, updated_at = datetime('now') WHERE id = $1",
+        [noteId]
+      );
+      setDueReminders((prev) => prev.filter((n) => n.id !== noteId));
+      toast.success("Reminder dismissed");
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  }, []);
+
+  const remindAgainNextSession = useCallback(async (noteId: string) => {
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      await conn.execute(
+        "UPDATE game_notes SET reminder_enabled = 1, remind_next_session = 1, is_dismissed = 0, updated_at = datetime('now') WHERE id = $1",
+        [noteId]
+      );
+      setDueReminders((prev) => prev.filter((n) => n.id !== noteId));
+      toast.success("Will remind next session");
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  }, []);
 
   /* ─── Bootstrap ──────────────────────────────────────── */
 
@@ -497,6 +648,7 @@ export default function Overlay() {
     { key: "ops", icon: <Gamepad2 className="size-3" />, label: "Ops" },
     { key: "notes", icon: <StickyNote className="size-3" />, label: "Notes" },
     { key: "macros", icon: <Keyboard className="size-3" />, label: "Macros" },
+    { key: "perf", icon: <Activity className="size-3" />, label: "Perf" },
     { key: "ai", icon: <MessageSquareText className="size-3" />, label: "AI" },
     { key: "search", icon: <Globe className="size-3" />, label: "Search" },
     { key: "arcade", icon: <Swords className="size-3" />, label: "Arcade" },
@@ -509,6 +661,69 @@ export default function Overlay() {
       className="h-screen w-screen overflow-hidden bg-transparent select-none"
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
     >
+      {/* ── Reminder Popup (notes alarms) ─────────────────── */}
+      {!reminderHidden && matchedGame && dueReminders.length > 0 && (
+        <div className="fixed left-1/2 top-[62px] z-[60] w-[680px] max-w-[calc(100vw-16px)] -translate-x-1/2 px-2">
+          <div className="rounded-2xl border border-white/[0.12] bg-black/85 backdrop-blur-2xl overflow-hidden shadow-xl">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.08]">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold text-white truncate">Reminders · {matchedGame.name}</p>
+                <p className="text-[8px] text-white/40 truncate">Quick notes you asked to see in this session</p>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="size-6 text-white/40 hover:text-white"
+                onClick={() => setReminderHidden(true)}
+                style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+              >
+                <X className="size-3" />
+              </Button>
+            </div>
+            <div className="p-3 space-y-2">
+              {dueReminders.slice(0, 4).map((n) => (
+                <div key={n.id} className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-2">
+                  <div className="flex items-start gap-2">
+                    <div className="mt-1 size-2 rounded-full" style={{ backgroundColor: n.color }} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] font-semibold text-white truncate">{n.title}</p>
+                      {n.content ? (
+                        <p className="text-[8px] text-white/45 mt-0.5 line-clamp-2 leading-relaxed">{n.content}</p>
+                      ) : (
+                        <p className="text-[8px] text-white/30 mt-0.5">(No content)</p>
+                      )}
+                      <div className="flex items-center gap-1.5 mt-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-[9px] text-white/60 hover:text-white hover:bg-white/10"
+                          onClick={() => void remindAgainNextSession(n.id)}
+                          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+                        >
+                          Remind next session again
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 px-2 text-[9px] text-red-300/80 hover:text-red-200 hover:bg-red-500/10"
+                          onClick={() => void dismissReminderForever(n.id)}
+                          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+                        >
+                          Stop forever
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {dueReminders.length > 4 && (
+                <p className="text-[8px] text-white/30">+{dueReminders.length - 4} more… open Notes for full list</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Restore Confirmation Dialog ───────────────────── */}
       {restoreConfirm && (
         <div className="fixed inset-0 z-50 flex items-start justify-center pt-16">
@@ -575,6 +790,10 @@ export default function Overlay() {
             </p>
           ) : statusText ? (
             <p className={cn("text-[7px] truncate", statusText.includes("...") ? "text-sky-400 animate-pulse" : "text-emerald-400")}>{statusText}</p>
+          ) : sessionStartMs && sessionElapsed > 0 ? (
+            <p className="text-[7px] text-sky-400 truncate tabular-nums">
+              ⏱ {formatSessionTime(sessionElapsed)}
+            </p>
           ) : selectedGame && lastBackup ? (
             <p className="text-[7px] text-white/45 truncate">
               {formatRelativeTime(lastBackup.created_at)}
@@ -683,7 +902,7 @@ export default function Overlay() {
       {/* ── Expanded Panel ────────────────────────────────── */}
       {expanded && (
         <div
-          className="mx-auto rounded-b-2xl border border-white/[0.12] border-t-0 backdrop-blur-2xl text-white overflow-hidden"
+          className="mx-auto rounded-b-2xl border border-white/[0.12] border-t-0 backdrop-blur-2xl text-white overflow-hidden cursor-default"
           style={{ maxWidth: 700, height: EXPANDED_HEIGHT - STRIP_HEIGHT, background: `rgba(0,0,0,${(liveOpacity || 92) / 100})` }}
         >
           {activeTab === "ops" && (
@@ -718,6 +937,17 @@ export default function Overlay() {
             </div>
           )}
           {activeTab === "macros" && <OverlayMacros gameId={selectedGameId} />}
+          {activeTab === "perf" && (
+            <ScrollArea className="h-full">
+              <div className="p-3">
+                <PerformancePanel
+                  pid={selectedWindow?.pid ?? null}
+                  title="Performance"
+                  compact
+                />
+              </div>
+            </ScrollArea>
+          )}
           {activeTab === "ai" && (
             <div className="h-full select-text">
               <OverlayChat

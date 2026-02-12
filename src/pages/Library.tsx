@@ -261,11 +261,20 @@ function GameCard({ game, onClick }: { game: Game; onClick: () => void }) {
         <p className="text-[9px] text-muted-foreground truncate">
           {game.developer}
         </p>
-        {game.last_played_at && (
-          <p className="text-[8px] text-muted-foreground/60">
-            {formatRelativeTime(game.last_played_at)}
-          </p>
-        )}
+        <div className="flex items-center gap-1.5">
+          {game.total_playtime_seconds > 0 && (
+            <span className="text-[8px] text-muted-foreground/70 tabular-nums">
+              {game.total_playtime_seconds >= 3600
+                ? `${Math.floor(game.total_playtime_seconds / 3600)}h ${Math.floor((game.total_playtime_seconds % 3600) / 60)}m`
+                : `${Math.floor(game.total_playtime_seconds / 60)}m`}
+            </span>
+          )}
+          {game.last_played_at && (
+            <span className="text-[8px] text-muted-foreground/50">
+              {formatRelativeTime(game.last_played_at)}
+            </span>
+          )}
+        </div>
       </div>
     </button>
   );
@@ -307,6 +316,13 @@ function GameListItem({ game, onClick }: { game: Game; onClick: () => void }) {
 
       {/* Meta */}
       <div className="ml-auto flex items-center gap-2 max-sm:w-full max-sm:justify-between">
+        {game.total_playtime_seconds > 0 && (
+          <span className="text-[9px] text-muted-foreground tabular-nums">
+            {game.total_playtime_seconds >= 3600
+              ? `${Math.floor(game.total_playtime_seconds / 3600)}h ${Math.floor((game.total_playtime_seconds % 3600) / 60)}m`
+              : `${Math.floor(game.total_playtime_seconds / 60)}m`}
+          </span>
+        )}
         {game.last_played_at && (
           <span className="text-[9px] text-muted-foreground">
             {formatRelativeTime(game.last_played_at)}

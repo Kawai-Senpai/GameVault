@@ -280,6 +280,22 @@ html, body {
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
 }
 
+/* Ensure buttons/links/inputs always show correct cursor even in drag regions */
+button,
+a,
+[role="button"],
+input,
+textarea,
+select,
+label,
+[data-slot="switch"] {
+  cursor: pointer;
+}
+
+input, textarea, select {
+  cursor: text;
+}
+
 /* ─── Skeleton loading ────────────────────────────────────────── */
 .skeleton {
   background: linear-gradient(

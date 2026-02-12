@@ -8,6 +8,7 @@ import KeyMapper from "@/pages/KeyMapper";
 import Macros from "@/pages/Macros";
 import AiChat from "@/pages/AiChat";
 import Notes from "@/pages/Notes";
+import Performance from "@/pages/Performance";
 import Shortcuts from "@/pages/Shortcuts";
 import SettingsPage from "@/pages/Settings";
 import SetupWizard from "@/pages/SetupWizard";
@@ -54,6 +55,7 @@ export default function AppRoutes() {
           <Route path="/macros" element={<Macros />} />
           <Route path="/ai-chat" element={<AiChat />} />
           <Route path="/notes" element={<Notes />} />
+          <Route path="/performance" element={<Performance />} />
           <Route path="/shortcuts" element={<Shortcuts />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

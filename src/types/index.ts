@@ -225,6 +225,34 @@ export interface GameNote {
   content: string;
   color: string;
   is_pinned: boolean;
+  // Reminders
+  reminder_enabled: boolean;
+  remind_next_session: boolean;
+  remind_at: string | null;
+  recurring_days: number | null;
+  last_reminded_at: string | null;
+  last_shown_at: string | null;
+  is_dismissed: boolean;
   created_at: string;
+  updated_at: string;
+}
+
+// ─── Playtime Types ─────────────────────────────────────────
+
+export interface PlaySession {
+  id: string;
+  game_id: string;
+  pid: number | null;
+  exe_path: string | null;
+  started_at: string;
+  ended_at: string;
+  duration_seconds: number;
+  created_at: string;
+}
+
+export interface PlaytimeDailyPoint {
+  game_id: string;
+  day: string; // YYYY-MM-DD
+  duration_seconds: number;
   updated_at: string;
 }
