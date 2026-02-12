@@ -235,7 +235,7 @@ export default function Overlay() {
 
         setDueReminders(mapped);
 
-        // Mark “due” reminders as shown so they don't spam inside the same session
+        // Mark "due" reminders as shown so they don't spam inside the same session
         if (mapped.length > 0) {
           const ids = mapped.map((n) => n.id);
           const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
@@ -885,7 +885,7 @@ export default function Overlay() {
                 </div>
               ))}
               {dueReminders.length > 4 && (
-                <p className="text-[8px] text-white/30">+{dueReminders.length - 4} more… open Notes for full list</p>
+                <p className="text-[8px] text-white/30">+{dueReminders.length - 4} more... open Notes for full list</p>
               )}
             </div>
           </div>

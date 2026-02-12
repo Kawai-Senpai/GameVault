@@ -55,7 +55,7 @@ export default function Recordings() {
         unlisten = await listen<{ is_recording: boolean }>("recording-state-changed", (event) => {
           setIsRecording(event.payload.is_recording);
           if (!event.payload.is_recording) {
-            // Recording just stopped — reload list after a short delay for file to be ready
+            // Recording just stopped - reload list after a short delay for file to be ready
             setTimeout(() => loadRecordings(), 500);
           }
         });

@@ -733,7 +733,7 @@ export default function Settings() {
                     value={settings.recordings_directory}
                     readOnly
                     className="flex-1 text-[10px]"
-                    placeholder="Not set — uses screenshots directory"
+                    placeholder="Not set - uses screenshots directory"
                   />
                   <Button
                     variant="outline"

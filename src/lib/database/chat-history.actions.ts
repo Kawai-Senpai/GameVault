@@ -1,5 +1,5 @@
 /**
- * GameVault AI Chat History — SQLite-backed CRUD layer.
+ * GameVault AI Chat History - SQLite-backed CRUD layer.
  * Mirrors the GodVision pattern: proper relational storage with
  * conversations + messages tables, shared between main app & overlay.
  */

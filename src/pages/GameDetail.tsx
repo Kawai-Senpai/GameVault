@@ -1152,10 +1152,10 @@ export default function GameDetail() {
                       <p className="text-[11px] font-medium">Auto-Backup</p>
                       <p className="text-[9px] text-muted-foreground">
                         {!settings.auto_backup_enabled
-                          ? "Global auto-backup is OFF — enable it in Settings to use per-game backups"
+                          ? "Global auto-backup is OFF - enable it in Settings to use per-game backups"
                           : game.auto_backup_disabled
-                            ? "Disabled — this game is excluded from automatic backups"
-                            : "Enabled — saves are backed up automatically"}
+                            ? "Disabled - this game is excluded from automatic backups"
+                            : "Enabled - saves are backed up automatically"}
                       </p>
                     </div>
                     <Switch

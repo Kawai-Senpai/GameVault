@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/game vault poster.jpg" alt="Game Vault Banner" width="100%" />
+  <img src="assets/branding/game vault poster.png" alt="Game Vault Banner" width="100%" />
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  Backup, restore, organize, and protect your game saves — with AI chat, screen capture, key remapping, macros, an in-game overlay, and so much more.
+  Backup, restore, organize, and protect your game saves - with AI chat, screen capture, key remapping, macros, an in-game overlay, and so much more.
 </p>
 
 <p align="center">
@@ -45,7 +45,7 @@
 
 ## ✨ Features
 
-Game Vault is not just a save manager — it's a complete gaming companion. Everything you need, from game saves to AI-powered assistance, all in one beautiful interface.
+Game Vault is not just a save manager - it's a complete gaming companion. Everything you need, from game saves to AI-powered assistance, all in one beautiful interface.
 
 <br />
 
@@ -55,37 +55,37 @@ Game Vault is not just a save manager — it's a complete gaming companion. Ever
 <tr>
 <td width="60">🗜️</td>
 <td>
-<strong>Compressed Backups</strong> — ZIP compression (level 9 Deflated) for minimal storage footprint
+<strong>Compressed Backups</strong> - ZIP compression (level 9 Deflated) for minimal storage footprint
 </td>
 </tr>
 <tr>
 <td>🔐</td>
 <td>
-<strong>SHA-256 Deduplication</strong> — Content hashing skips backups when saves haven't changed
+<strong>SHA-256 Deduplication</strong> - Content hashing skips backups when saves haven't changed
 </td>
 </tr>
 <tr>
 <td>📦</td>
 <td>
-<strong>Backup Collections</strong> — Organize backups into named, color-coded groups with retention limits
+<strong>Backup Collections</strong> - Organize backups into named, color-coded groups with retention limits
 </td>
 </tr>
 <tr>
 <td>🔄</td>
 <td>
-<strong>One-Click Restore</strong> — Instantly restore any backup with full file extraction
+<strong>One-Click Restore</strong> - Instantly restore any backup with full file extraction
 </td>
 </tr>
 <tr>
 <td>📤</td>
 <td>
-<strong>Export & Import</strong> — Move individual backups between machines or share with friends
+<strong>Export & Import</strong> - Move individual backups between machines or share with friends
 </td>
 </tr>
 <tr>
 <td>📁</td>
 <td>
-<strong>Auto Reconciliation</strong> — On-disk backups are synced with the database on every startup
+<strong>Auto Reconciliation</strong> - On-disk backups are synced with the database on every startup
 </td>
 </tr>
 </table>
@@ -94,7 +94,7 @@ Game Vault is not just a save manager — it's a complete gaming companion. Ever
 
 - Configurable intervals: **6h / 12h / Daily / 2 Days / Weekly**
 - Per-game max retention with automatic old backup pruning
-- Smart duplicate detection — won't backup if nothing changed
+- Smart duplicate detection - won't backup if nothing changed
 - Live progress tracking with current/total game status
 - Desktop notifications on completion
 - Per-game auto-backup disable option
@@ -103,7 +103,7 @@ Game Vault is not just a save manager — it's a complete gaming companion. Ever
 
 - **80+ pre-configured games** with auto-detection (scans save paths on your system)
 - Steam userdata path resolution with environment variable expansion
-- Custom game support — add any game with manual save paths and exe paths
+- Custom game support - add any game with manual save paths and exe paths
 - Favorites system with pin-to-top sorting
 - Custom cover & header images
 - Search, sort (name, recent, developer, favorites), grid/list views
@@ -111,7 +111,7 @@ Game Vault is not just a save manager — it's a complete gaming companion. Ever
 
 ### ⏱️ Playtime Tracking
 
-- **Fully automatic** — polls running windows every 3 seconds
+- **Fully automatic** - polls running windows every 3 seconds
 - Matches games by exe path or fuzzy window title matching
 - Daily playtime charts with interactive bar graphs
 - Session history with PID, exe path, and start/end times
@@ -123,7 +123,7 @@ Game Vault is not just a save manager — it's a complete gaming companion. Ever
 - Full-screen and area capture via native `xcap`
 - Auto-thumbnail generation (320px, Lanczos3 filter)
 - Per-game organized storage
-- Global hotkey (default: **F12**) — works even in fullscreen games
+- Global hotkey (default: **F12**) - works even in fullscreen games
 - Gallery with grid/list view, search, and game filtering
 
 ### 🎥 Screen Recording
@@ -135,13 +135,13 @@ Game Vault is not just a save manager — it's a complete gaming companion. Ever
 - Start/stop via global hotkey (default: **F9**), tray, or overlay
 - Auto-thumbnail from first frame
 - **One-click FFmpeg download** (~80MB portable build, no installation needed)
-- Cross-window state sync — start recording anywhere, see the timer everywhere
+- Cross-window state sync - start recording anywhere, see the timer everywhere
 
 ### ⌨️ Key Remapping
 
 - Source → Target key remapping via Windows `SendInput` API
 - Global or per-game scope
-- Interactive key recording — just press the combo you want
+- Interactive key recording - just press the combo you want
 - Toggle individual mappings on/off instantly
 
 ### 🔁 Macro System
@@ -162,7 +162,7 @@ Game Vault is not just a save manager — it's a complete gaming companion. Ever
 - **Web search**: Enable live web data via OpenRouter `:online` models
 - Full conversation management: create, auto-rename, delete
 - **Rich Markdown rendering**: syntax highlighting (Shiki), $\LaTeX$ math (KaTeX), GFM tables
-- SQLite-backed persistence — conversations survive app restarts
+- SQLite-backed persistence - conversations survive app restarts
 - Shared history between main app and in-game overlay
 
 ### 🎯 In-Game Overlay
@@ -178,7 +178,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 | **🔁 Macros** | Quick macro trigger panel |
 | **🤖 AI Chat** | Full AI chat in-overlay, shared history with main app |
 | **🔍 Search** | Built-in web browser (Google, DuckDuckGo, Bing, YouTube) with history |
-| **🕹️ Arcade** | Mini-games — Tic Tac Toe (vs AI), Snake, Flappy Bird |
+| **🕹️ Arcade** | Mini-games - Tic Tac Toe (vs AI), Snake, Flappy Bird |
 | **📊 Perf** | Real-time CPU, RAM, GPU performance monitor |
 
 ### 📝 Notes & Smart Reminders
@@ -187,7 +187,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 - **10 color options** for visual organization
 - Pin/unpin, archive/unarchive, tag system
 - **Smart reminders**:
-  - "Remind Next Session" — triggers when the game launches
+  - "Remind Next Session" - triggers when the game launches
   - Recurring reminders with configurable interval (days)
   - Desktop notifications + overlay popup
   - Dismiss or snooze support
@@ -205,10 +205,10 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 
 - **System tray** with quick actions: backup, screenshot, recording, overlay
 - **Launch on startup** via Windows Registry
-- **Minimize to tray** — close button hides, doesn't quit
-- **Auto-update** — checks GitHub releases, in-app download & install
-- **Data export/import** — `.gvdump` format for migration between machines
-- **First-run setup wizard** — guided onboarding experience
+- **Minimize to tray** - close button hides, doesn't quit
+- **Auto-update** - checks GitHub releases, in-app download & install
+- **Data export/import** - `.gvdump` format for migration between machines
+- **First-run setup wizard** - guided onboarding experience
 
 ---
 
@@ -219,7 +219,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 <p align="center">
   <img src="assets/screenshot/screenshot_main_grid.png" alt="Game Library" width="100%" />
   <br />
-  <em>Game Library — beautiful grid view with game covers, playtime tracking, and favorites</em>
+  <em>Game Library - beautiful grid view with game covers, playtime tracking, and favorites</em>
 </p>
 
 <br />
@@ -227,7 +227,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 <p align="center">
   <img src="assets/screenshot/screenshot_ai_chat.png" alt="AI Chat" width="100%" />
   <br />
-  <em>AI Chat — streaming responses with Markdown, LaTeX, syntax highlighting, and image support</em>
+  <em>AI Chat - streaming responses with Markdown, LaTeX, syntax highlighting, and image support</em>
 </p>
 
 <br />
@@ -235,7 +235,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 <p align="center">
   <img src="assets/screenshot/screenshot_overlay.png" alt="In-Game Overlay" width="100%" />
   <br />
-  <em>In-Game Overlay — always-on-top strip with backup ops, notes, macros, AI, browser, arcade, and performance</em>
+  <em>In-Game Overlay - always-on-top strip with backup ops, notes, macros, AI, browser, arcade, and performance</em>
 </p>
 
 <br />
@@ -243,7 +243,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 <p align="center">
   <img src="assets/screenshot/screenshot_ai_chat_overlay.png" alt="AI Chat Overlay" width="100%" />
   <br />
-  <em>AI Chat in Overlay — full AI assistant accessible while gaming</em>
+  <em>AI Chat in Overlay - full AI assistant accessible while gaming</em>
 </p>
 
 <br />
@@ -251,7 +251,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 <p align="center">
   <img src="assets/screenshot/screenshot_browser.png" alt="Built-in Browser" width="100%" />
   <br />
-  <em>Overlay Browser — search Google, DuckDuckGo, Bing, or YouTube without leaving your game</em>
+  <em>Overlay Browser - search Google, DuckDuckGo, Bing, or YouTube without leaving your game</em>
 </p>
 
 <br />
@@ -259,7 +259,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 <p align="center">
   <img src="assets/screenshot/screenshot_notes.png" alt="Notes" width="100%" />
   <br />
-  <em>Notes — per-game notes with colors, tags, pinning, reminders, and smart notifications</em>
+  <em>Notes - per-game notes with colors, tags, pinning, reminders, and smart notifications</em>
 </p>
 
 <br />
@@ -267,7 +267,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 <p align="center">
   <img src="assets/screenshot/screenshot_stats.png" alt="Performance" width="100%" />
   <br />
-  <em>Performance Monitor — real-time CPU, RAM, and GPU monitoring with sparkline graphs</em>
+  <em>Performance Monitor - real-time CPU, RAM, and GPU monitoring with sparkline graphs</em>
 </p>
 
 <br />
@@ -275,7 +275,7 @@ A floating, always-on-top overlay accessible with a single shortcut, designed to
 <p align="center">
   <img src="assets/screenshot/screenshot_mini_game.png" alt="Mini Games" width="100%" />
   <br />
-  <em>Arcade — Tic Tac Toe, Snake, and Flappy Bird right inside the overlay</em>
+  <em>Arcade - Tic Tac Toe, Snake, and Flappy Bird right inside the overlay</em>
 </p>
 
 ---
@@ -290,7 +290,7 @@ Download the latest release from the [Releases page](https://github.com/Kawai-Se
 
 | Format | Description |
 |--------|-------------|
-| `.exe` (NSIS) | Recommended — standard Windows installer |
+| `.exe` (NSIS) | Recommended - standard Windows installer |
 | `.msi` | Windows Installer package |
 
 ### System Requirements
@@ -301,7 +301,7 @@ Download the latest release from the [Releases page](https://github.com/Kawai-Se
 | **RAM** | 4 GB |
 | **Storage** | ~150 MB (app) + backup storage |
 | **Runtime** | [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 10/11) |
-| **Optional** | FFmpeg (for screen recording — can be auto-downloaded from Settings) |
+| **Optional** | FFmpeg (for screen recording - can be auto-downloaded from Settings) |
 
 ### Build from Source
 
@@ -360,7 +360,7 @@ Games are detected automatically by checking if known save paths exist on your s
 
 - Go to **Settings → AI Assistant**
 - Enter your **OpenRouter API key** (get one free at [openrouter.ai](https://openrouter.ai))
-- Start chatting from the main app or the overlay — your conversations are synced
+- Start chatting from the main app or the overlay - your conversations are synced
 
 ### 6. Screen Recording Setup
 
@@ -505,8 +505,8 @@ Games are detected automatically by checking if known save paths exist on your s
 | `games.rs` | Game detection, environment variable expansion, running window enumeration, game launching |
 | `screenshots.rs` | Screen capture (xcap), area capture, thumbnails, gallery management |
 | `recording.rs` | FFmpeg screen recording, start/stop, status tracking, auto-thumbnail, FFmpeg download |
-| `keymapper.rs` | Windows SendInput key simulation — press, release, tap with delay |
-| `perf.rs` | System performance — CPU/RAM (sysinfo), GPU (PDH counters), per-process stats |
+| `keymapper.rs` | Windows SendInput key simulation - press, release, tap with delay |
+| `perf.rs` | System performance - CPU/RAM (sysinfo), GPU (PDH counters), per-process stats |
 | `tray.rs` | System tray with menu items and event emission |
 | `datadump.rs` | Full data export/import in `.gvdump` JSON format |
 
@@ -554,7 +554,7 @@ src/
 
 ## 🔄 What's New in v2.0
 
-Game Vault v2.0 is a **complete rewrite** — from a Python/CustomTkinter app to a native Tauri v2 application.
+Game Vault v2.0 is a **complete rewrite** - from a Python/CustomTkinter app to a native Tauri v2 application.
 
 ### From v1 (Python)
 
@@ -621,7 +621,7 @@ npm run tauri build
 
 ## 📄 License
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
 
 ---
 

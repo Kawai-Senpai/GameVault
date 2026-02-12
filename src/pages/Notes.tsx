@@ -634,7 +634,7 @@ export default function Notes() {
                     <SelectItem value="1">Daily</SelectItem>
                     <SelectItem value="7">Weekly</SelectItem>
                     <SelectItem value="30">Monthly</SelectItem>
-                    <SelectItem value="custom">Custom…</SelectItem>
+                    <SelectItem value="custom">Custom...</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

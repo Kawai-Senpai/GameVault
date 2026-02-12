@@ -22,7 +22,7 @@ pub fn run() {
                 .add_migrations(
                     "sqlite:gamevault.db",
                     vec![
-                        // Single consolidated migration — fresh DB
+                        // Single consolidated migration - fresh DB
                         tauri_plugin_sql::Migration {
                             version: 1,
                             description: "Create all tables",
