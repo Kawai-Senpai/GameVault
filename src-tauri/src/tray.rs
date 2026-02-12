@@ -9,6 +9,7 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let show_i = MenuItem::with_id(app, "show", "Show Game Vault", true, None::<&str>)?;
     let backup_i = MenuItem::with_id(app, "quick_backup", "Quick Backup", true, None::<&str>)?;
     let screenshot_i = MenuItem::with_id(app, "screenshot", "Take Screenshot", true, None::<&str>)?;
+    let recording_i = MenuItem::with_id(app, "toggle_recording", "Toggle Recording", true, None::<&str>)?;
     let separator_1 = MenuItem::with_id(app, "sep1", "───────────", false, None::<&str>)?;
     let overlay_i = MenuItem::with_id(app, "overlay", "Toggle Overlay", true, None::<&str>)?;
     let separator_2 = MenuItem::with_id(app, "sep2", "───────────", false, None::<&str>)?;
@@ -21,6 +22,7 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             &separator_1,
             &backup_i,
             &screenshot_i,
+            &recording_i,
             &overlay_i,
             &separator_2,
             &quit_i,
@@ -83,6 +85,9 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             "screenshot" => {
                 // Use global emit
                 let _ = app.emit("tray-take-screenshot", ());
+            }
+            "toggle_recording" => {
+                let _ = app.emit("tray-toggle-recording", ());
             }
             "overlay" => {
                 if let Some(overlay) = app.get_webview_window("overlay") {

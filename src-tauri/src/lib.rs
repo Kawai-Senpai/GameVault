@@ -3,6 +3,7 @@ mod datadump;
 mod games;
 mod keymapper;
 mod perf;
+mod recording;
 mod screenshots;
 mod tray;
 
@@ -21,10 +22,10 @@ pub fn run() {
                 .add_migrations(
                     "sqlite:gamevault.db",
                     vec![
-                        // Migration 1: Core tables
+                        // Single consolidated migration — fresh DB
                         tauri_plugin_sql::Migration {
                             version: 1,
-                            description: "Create core tables",
+                            description: "Create all tables",
                             sql: r#"
                                 CREATE TABLE IF NOT EXISTS games (
                                     id TEXT PRIMARY KEY,
@@ -45,6 +46,7 @@ pub fn run() {
                                     play_count INTEGER DEFAULT 0,
                                     total_playtime_seconds INTEGER DEFAULT 0,
                                     last_played_at TEXT,
+                                    auto_backup_disabled INTEGER DEFAULT 0,
                                     added_at TEXT NOT NULL DEFAULT (datetime('now')),
                                     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
                                 );
@@ -88,8 +90,23 @@ pub fn run() {
                                     width INTEGER DEFAULT 0,
                                     height INTEGER DEFAULT 0,
                                     file_size INTEGER DEFAULT 0,
-                                    captured_at TEXT NOT NULL DEFAULT (datetime('now')),
-                                    FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+                                    captured_at TEXT NOT NULL DEFAULT (datetime('now'))
+                                );
+
+                                CREATE TABLE IF NOT EXISTS recordings (
+                                    id TEXT PRIMARY KEY,
+                                    game_id TEXT NOT NULL,
+                                    file_path TEXT NOT NULL,
+                                    thumbnail_path TEXT DEFAULT '',
+                                    title TEXT DEFAULT '',
+                                    description TEXT DEFAULT '',
+                                    tags TEXT NOT NULL DEFAULT '[]',
+                                    width INTEGER DEFAULT 0,
+                                    height INTEGER DEFAULT 0,
+                                    file_size INTEGER DEFAULT 0,
+                                    duration_seconds REAL DEFAULT 0,
+                                    fps INTEGER DEFAULT 30,
+                                    recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
                                 );
 
                                 CREATE TABLE IF NOT EXISTS key_mappings (
@@ -137,6 +154,7 @@ pub fn run() {
                                     id TEXT PRIMARY KEY,
                                     game_id TEXT,
                                     title TEXT DEFAULT 'New Chat',
+                                    source TEXT DEFAULT 'main',
                                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                                     FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE SET NULL
@@ -148,6 +166,7 @@ pub fn run() {
                                     role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
                                     content TEXT NOT NULL,
                                     image_paths TEXT DEFAULT '[]',
+                                    metadata TEXT,
                                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                                     FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id) ON DELETE CASCADE
                                 );
@@ -159,104 +178,22 @@ pub fn run() {
                                     content TEXT NOT NULL DEFAULT '',
                                     color TEXT DEFAULT '#6366f1',
                                     is_pinned INTEGER DEFAULT 0,
+                                    reminder_enabled INTEGER DEFAULT 0,
+                                    remind_next_session INTEGER DEFAULT 0,
+                                    remind_at TEXT,
+                                    recurring_days INTEGER,
+                                    last_reminded_at TEXT,
+                                    last_shown_at TEXT,
+                                    is_dismissed INTEGER DEFAULT 0,
+                                    tags TEXT DEFAULT '[]',
+                                    is_archived INTEGER DEFAULT 0,
                                     created_at TEXT NOT NULL DEFAULT (datetime('now')),
                                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                                     FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
                                 );
 
-                                -- Default settings
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('backup_directory', '');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('theme', 'dark');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_detect_games', 'true');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('notifications_enabled', 'true');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('screenshots_directory', '');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_provider', 'openrouter');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_api_key', '');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_openrouter_api_key', '');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_openai_api_key', '');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_model', 'openai/gpt-4o-mini');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('overlay_shortcut', 'Shift+Tab');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('screenshot_shortcut', 'F12');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('quick_backup_shortcut', 'Ctrl+Shift+B');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('setup_complete', 'false');
-
-                                -- New settings defaults
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_backup_enabled', 'true');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_backup_interval_minutes', '30');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('max_backups_per_game', '10');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('compress_backups', 'true');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_backup_complete', 'true');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('launch_on_startup', 'true');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('minimize_to_tray', 'true');
-
-                                -- Default shortcuts
-                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s1', 'toggle_overlay', 'Toggle Overlay', 'Shift+Tab', 1, 'overlay');
-                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s2', 'take_screenshot', 'Take Screenshot', 'F12', 1, 'screenshots');
-                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s3', 'quick_backup', 'Quick Backup', 'Ctrl+Shift+B', 1, 'backups');
-                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s4', 'toggle_key_mappings', 'Toggle Key Mappings', 'Ctrl+Shift+K', 1, 'keymapper');
-                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s5', 'toggle_macros', 'Toggle Macros', 'Ctrl+Shift+M', 1, 'macros');
-                            "#,
-                            kind: tauri_plugin_sql::MigrationKind::Up,
-                        },
-                        // Migration 2: Update overlay shortcut (Shift+Tab conflicts with Steam)
-                        tauri_plugin_sql::Migration {
-                            version: 2,
-                            description: "Update overlay shortcut to Ctrl+Shift+G",
-                            sql: r#"
-                                UPDATE settings SET value = 'Ctrl+Shift+G' WHERE key = 'overlay_shortcut' AND value = 'Shift+Tab';
-                                UPDATE shortcuts SET keys = 'Ctrl+Shift+G' WHERE id = 's1' AND keys = 'Shift+Tab';
-                            "#,
-                            kind: tauri_plugin_sql::MigrationKind::Up,
-                        },
-                        // Migration 3: Per-game auto-backup toggle
-                        tauri_plugin_sql::Migration {
-                            version: 3,
-                            description: "Add per-game auto-backup disable column",
-                            sql: r#"
-                                ALTER TABLE games ADD COLUMN auto_backup_disabled INTEGER DEFAULT 0;
-                            "#,
-                            kind: tauri_plugin_sql::MigrationKind::Up,
-                        },
-                        // Migration 4: Overlay opacity setting
-                        tauri_plugin_sql::Migration {
-                            version: 4,
-                            description: "Add overlay opacity setting",
-                            sql: r#"
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('overlay_opacity', '92');
-                            "#,
-                            kind: tauri_plugin_sql::MigrationKind::Up,
-                        },
-                        // Migration 5: Update default AI model to gpt-5.2
-                        tauri_plugin_sql::Migration {
-                            version: 5,
-                            description: "Update default AI model",
-                            sql: r#"
-                                UPDATE settings SET value = 'openai/gpt-5.2:online' WHERE key = 'ai_model' AND value = 'openai/gpt-4o-mini';
-                                UPDATE settings SET value = 'openai/gpt-5.2:online' WHERE key = 'ai_model' AND value = 'openai/gpt-4o:online';
-                            "#,
-                            kind: tauri_plugin_sql::MigrationKind::Up,
-                        },
-                        // Migration 6: Note reminders (next-session + recurring)
-                        tauri_plugin_sql::Migration {
-                            version: 6,
-                            description: "Add note reminder fields",
-                            sql: r#"
-                                ALTER TABLE game_notes ADD COLUMN reminder_enabled INTEGER DEFAULT 0;
-                                ALTER TABLE game_notes ADD COLUMN remind_next_session INTEGER DEFAULT 0;
-                                ALTER TABLE game_notes ADD COLUMN remind_at TEXT;
-                                ALTER TABLE game_notes ADD COLUMN recurring_days INTEGER;
-                                ALTER TABLE game_notes ADD COLUMN last_reminded_at TEXT;
-                                ALTER TABLE game_notes ADD COLUMN last_shown_at TEXT;
-                                ALTER TABLE game_notes ADD COLUMN is_dismissed INTEGER DEFAULT 0;
                                 CREATE INDEX IF NOT EXISTS idx_game_notes_reminders ON game_notes(game_id, reminder_enabled, is_dismissed);
-                            "#,
-                            kind: tauri_plugin_sql::MigrationKind::Up,
-                        },
-                        // Migration 7: Play sessions + daily aggregation (graphs per day)
-                        tauri_plugin_sql::Migration {
-                            version: 7,
-                            description: "Add playtime session tables",
-                            sql: r#"
+
                                 CREATE TABLE IF NOT EXISTS play_sessions (
                                     id TEXT PRIMARY KEY,
                                     game_id TEXT NOT NULL,
@@ -279,50 +216,44 @@ pub fn run() {
                                     PRIMARY KEY (game_id, day),
                                     FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
                                 );
-                            "#,
-                            kind: tauri_plugin_sql::MigrationKind::Up,
-                        },
-                        // Migration 8: Notes tags + archive
-                        tauri_plugin_sql::Migration {
-                            version: 8,
-                            description: "Add tags and archived flag to game_notes",
-                            sql: r#"
-                                ALTER TABLE game_notes ADD COLUMN tags TEXT DEFAULT '[]';
-                                ALTER TABLE game_notes ADD COLUMN is_archived INTEGER DEFAULT 0;
-                            "#,
-                            kind: tauri_plugin_sql::MigrationKind::Up,
-                        },
-                        // Migration 9: Drop FK constraint on screenshots.game_id (allows _general etc.)
-                        tauri_plugin_sql::Migration {
-                            version: 9,
-                            description: "Remove FK constraint on screenshots game_id",
-                            sql: r#"
-                                CREATE TABLE IF NOT EXISTS screenshots_new (
-                                    id TEXT PRIMARY KEY,
-                                    game_id TEXT NOT NULL,
-                                    file_path TEXT NOT NULL,
-                                    thumbnail_path TEXT,
-                                    title TEXT DEFAULT '',
-                                    description TEXT DEFAULT '',
-                                    tags TEXT NOT NULL DEFAULT '[]',
-                                    width INTEGER DEFAULT 0,
-                                    height INTEGER DEFAULT 0,
-                                    file_size INTEGER DEFAULT 0,
-                                    captured_at TEXT NOT NULL DEFAULT (datetime('now'))
-                                );
-                                INSERT OR IGNORE INTO screenshots_new SELECT * FROM screenshots;
-                                DROP TABLE screenshots;
-                                ALTER TABLE screenshots_new RENAME TO screenshots;
-                            "#,
-                            kind: tauri_plugin_sql::MigrationKind::Up,
-                        },
-                        // Migration 10: Add metadata to ai_messages and source to ai_conversations
-                        tauri_plugin_sql::Migration {
-                            version: 10,
-                            description: "Add metadata column to ai_messages and source column to ai_conversations",
-                            sql: r#"
-                                ALTER TABLE ai_messages ADD COLUMN metadata TEXT;
-                                ALTER TABLE ai_conversations ADD COLUMN source TEXT DEFAULT 'main';
+
+                                -- Default settings
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('backup_directory', '');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('theme', 'dark');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_detect_games', 'true');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('notifications_enabled', 'true');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('screenshots_directory', '');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_provider', 'openrouter');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_api_key', '');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_openrouter_api_key', '');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_openai_api_key', '');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_model', 'openai/gpt-5.2:online');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('overlay_shortcut', 'Ctrl+Shift+G');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('screenshot_shortcut', 'F12');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('quick_backup_shortcut', 'Ctrl+Shift+B');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('setup_complete', 'false');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_backup_enabled', 'true');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_backup_interval_minutes', '30');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('max_backups_per_game', '10');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('compress_backups', 'true');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('notify_backup_complete', 'true');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('launch_on_startup', 'true');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('minimize_to_tray', 'true');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('overlay_opacity', '92');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('recordings_directory', '');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('recording_fps', '30');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('recording_resolution', 'native');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('recording_quality', 'medium');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('recording_shortcut', 'F9');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('ffmpeg_path', 'ffmpeg');
+
+                                -- Default shortcuts
+                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s1', 'toggle_overlay', 'Toggle Overlay', 'Ctrl+Shift+G', 1, 'overlay');
+                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s2', 'take_screenshot', 'Take Screenshot', 'F12', 1, 'screenshots');
+                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s3', 'quick_backup', 'Quick Backup', 'Ctrl+Shift+B', 1, 'backups');
+                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s4', 'toggle_key_mappings', 'Toggle Key Mappings', 'Ctrl+Shift+K', 1, 'keymapper');
+                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s5', 'toggle_macros', 'Toggle Macros', 'Ctrl+Shift+M', 1, 'macros');
+                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s6', 'toggle_recording', 'Toggle Recording', 'F9', 1, 'recordings');
                             "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
@@ -382,6 +313,16 @@ pub fn run() {
             screenshots::save_screenshot_file,
             screenshots::generate_thumbnail,
             screenshots::open_screenshot,
+            // Recording commands
+            recording::check_ffmpeg,
+            recording::start_recording,
+            recording::stop_recording,
+            recording::get_recording_status,
+            recording::open_recording,
+            recording::delete_recording_file,
+            recording::get_bundled_ffmpeg_path,
+            recording::download_ffmpeg,
+            recording::resolve_ffmpeg,
             // Key mapper commands
             keymapper::simulate_key_press,
             keymapper::simulate_key_release,

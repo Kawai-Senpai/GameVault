@@ -73,13 +73,13 @@ const iconMap: Record<string, React.ReactNode> = {
 
 export default function Shortcuts() {
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <Header
         title="Keyboard Shortcuts"
         description="Quick reference for all hotkeys"
       />
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-5 max-w-2xl space-y-4">
           {shortcuts.map((section) => (
             <Card key={section.category}>

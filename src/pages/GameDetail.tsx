@@ -54,10 +54,12 @@ import {
   ChevronRight,
   Upload,
   Share2,
+  Video,
+  ExternalLink,
 } from "lucide-react";
 import { cn, formatBytes, formatDate, formatRelativeTime } from "@/lib/utils";
 import GameCover from "@/components/GameCover";
-import type { Backup, BackupCollection, Screenshot, GameNote } from "@/types";
+import type { Backup, BackupCollection, Screenshot, GameNote, Recording } from "@/types";
 
 export default function GameDetail() {
   const { gameId } = useParams<{ gameId: string }>();
@@ -67,6 +69,7 @@ export default function GameDetail() {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [collections, setCollections] = useState<BackupCollection[]>([]);
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
+  const [recordings, setRecordings] = useState<Recording[]>([]);
   const [isLoadingBackups, setIsLoadingBackups] = useState(true);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
@@ -99,6 +102,7 @@ export default function GameDetail() {
     if (!gameId) return;
     loadBackups();
     loadScreenshots();
+    loadRecordings();
     loadGameNotes();
     loadPlaytimeDaily();
   }, [gameId]);
@@ -169,6 +173,37 @@ export default function GameDetail() {
       );
     } catch (err) {
       console.error("Failed to load screenshots:", err);
+    }
+  }, [gameId]);
+
+  const loadRecordings = useCallback(async () => {
+    if (!gameId) return;
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      const rows = (await conn.select(
+        "SELECT * FROM recordings WHERE game_id = $1 ORDER BY recorded_at DESC",
+        [gameId]
+      )) as Record<string, unknown>[];
+      setRecordings(
+        rows.map((r) => ({
+          id: r.id as string,
+          game_id: r.game_id as string,
+          file_path: r.file_path as string,
+          thumbnail_path: (r.thumbnail_path as string) || "",
+          title: (r.title as string) || "",
+          description: (r.description as string) || "",
+          tags: JSON.parse((r.tags as string) || "[]"),
+          width: (r.width as number) || 0,
+          height: (r.height as number) || 0,
+          file_size: (r.file_size as number) || 0,
+          duration_seconds: (r.duration_seconds as number) || 0,
+          fps: (r.fps as number) || 30,
+          recorded_at: r.recorded_at as string,
+        }))
+      );
+    } catch (err) {
+      console.error("Failed to load recordings:", err);
     }
   }, [gameId]);
 
@@ -829,6 +864,10 @@ export default function GameDetail() {
               <Image className="size-3 mr-1" /> Screenshots
               <Badge variant="secondary" className="ml-1.5 text-[8px] px-1 py-0">{screenshots.length}</Badge>
             </TabsTrigger>
+            <TabsTrigger value="recordings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-0 pb-2">
+              <Video className="size-3 mr-1" /> Recordings
+              {recordings.length > 0 && <Badge variant="secondary" className="ml-1.5 text-[8px] px-1 py-0">{recordings.length}</Badge>}
+            </TabsTrigger>
             <TabsTrigger value="info" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-0 pb-2">
               <Sparkles className="size-3 mr-1" /> Info
             </TabsTrigger>
@@ -840,7 +879,7 @@ export default function GameDetail() {
         </div>
 
         {/* Backups Tab */}
-        <TabsContent value="backups" className="flex-1 m-0">
+        <TabsContent value="backups" className="flex-1 min-h-0 overflow-hidden m-0">
           <ScrollArea className="h-full">
             <div className="p-5 space-y-3">
               {isLoadingBackups ? (
@@ -925,7 +964,7 @@ export default function GameDetail() {
         </TabsContent>
 
         {/* Screenshots Tab */}
-        <TabsContent value="screenshots" className="flex-1 m-0">
+        <TabsContent value="screenshots" className="flex-1 min-h-0 overflow-hidden m-0">
           <ScrollArea className="h-full">
             <div className="p-5">
               {screenshots.length === 0 ? (
@@ -950,8 +989,96 @@ export default function GameDetail() {
           </ScrollArea>
         </TabsContent>
 
+        {/* Recordings Tab */}
+        <TabsContent value="recordings" className="flex-1 min-h-0 overflow-hidden m-0">
+          <ScrollArea className="h-full">
+            <div className="p-5">
+              {recordings.length === 0 ? (
+                <div className="flex flex-col items-center py-12">
+                  <Video className="size-8 text-muted-foreground/30 mb-2" />
+                  <p className="text-xs text-muted-foreground">No recordings yet</p>
+                  <p className="text-[10px] text-muted-foreground/60">
+                    Press {settings.recording_shortcut || "F9"} to start recording while playing
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+                  {recordings.map((rec) => {
+                    const thumbSrc = rec.thumbnail_path ? convertFileSrc(rec.thumbnail_path) : null;
+                    const durStr = rec.duration_seconds >= 60
+                      ? `${Math.floor(rec.duration_seconds / 60)}m ${Math.floor(rec.duration_seconds % 60)}s`
+                      : `${Math.floor(rec.duration_seconds)}s`;
+
+                    return (
+                      <div
+                        key={rec.id}
+                        className="group relative rounded-lg border border-border overflow-hidden hover:border-foreground/20 transition-all"
+                      >
+                        {/* Thumbnail */}
+                        <div className="relative aspect-video bg-muted">
+                          {thumbSrc ? (
+                            <img src={thumbSrc} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Video className="size-6 text-muted-foreground/30" />
+                            </div>
+                          )}
+                          <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded">
+                            {durStr}
+                          </div>
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="text-[10px] h-6"
+                              onClick={async () => {
+                                try { await invoke("open_recording", { path: rec.file_path }); } catch (e: any) { toast.error(`${e}`); }
+                              }}
+                            >
+                              <ExternalLink className="size-3" /> Play
+                            </Button>
+                          </div>
+                        </div>
+                        {/* Info */}
+                        <div className="p-2">
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            {rec.title || formatDate(rec.recorded_at)}
+                          </p>
+                          <div className="flex items-center gap-2 text-[9px] text-muted-foreground/60">
+                            <span>{rec.width}×{rec.height}</span>
+                            <span>{formatBytes(rec.file_size)}</span>
+                            <span>{rec.fps}fps</span>
+                          </div>
+                        </div>
+                        {/* Delete button */}
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 text-white"
+                          onClick={async () => {
+                            try {
+                              await invoke("delete_recording_file", { path: rec.file_path });
+                              const db = await import("@tauri-apps/plugin-sql");
+                              const conn = await db.default.load("sqlite:gamevault.db");
+                              await conn.execute("DELETE FROM recordings WHERE id = $1", [rec.id]);
+                              setRecordings((prev) => prev.filter((r) => r.id !== rec.id));
+                              toast.success("Recording deleted");
+                            } catch (e: any) { toast.error(`${e}`); }
+                          }}
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </TabsContent>
+
         {/* Info Tab */}
-        <TabsContent value="info" className="flex-1 m-0">
+        <TabsContent value="info" className="flex-1 min-h-0 overflow-hidden m-0">
           <ScrollArea className="h-full">
             <div className="p-5 space-y-4 max-w-lg">
               <Card>
@@ -1024,13 +1151,16 @@ export default function GameDetail() {
                     <div>
                       <p className="text-[11px] font-medium">Auto-Backup</p>
                       <p className="text-[9px] text-muted-foreground">
-                        {game.auto_backup_disabled
-                          ? "Disabled - this game is excluded from automatic backups"
-                          : "Enabled - saves are backed up automatically"}
+                        {!settings.auto_backup_enabled
+                          ? "Global auto-backup is OFF — enable it in Settings to use per-game backups"
+                          : game.auto_backup_disabled
+                            ? "Disabled — this game is excluded from automatic backups"
+                            : "Enabled — saves are backed up automatically"}
                       </p>
                     </div>
                     <Switch
                       checked={!game.auto_backup_disabled}
+                      disabled={!settings.auto_backup_enabled}
                       onCheckedChange={async (checked) => {
                         try {
                           const db = await import("@tauri-apps/plugin-sql");
@@ -1111,7 +1241,7 @@ export default function GameDetail() {
         </TabsContent>
 
         {/* Notes Tab */}
-        <TabsContent value="notes" className="flex-1 m-0">
+        <TabsContent value="notes" className="flex-1 min-h-0 overflow-hidden m-0">
           <ScrollArea className="h-full">
             <div className="p-5 space-y-3 max-w-lg">
               <div className="flex items-center justify-between mb-2">

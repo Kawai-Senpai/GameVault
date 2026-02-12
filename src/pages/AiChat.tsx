@@ -51,6 +51,7 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Markdown } from "@/components/Markdown";
 
 // View-layer message type (extends DB type with transient UI fields)
 interface ChatMessage {
@@ -751,7 +752,7 @@ export default function AiChat() {
   const sortedConversations = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <Header
         title="AI Chat"
         description={
@@ -843,7 +844,7 @@ export default function AiChat() {
               </div>
 
               {/* Conversation list */}
-              <ScrollArea className="flex-1">
+              <ScrollArea className="flex-1 min-h-0">
                 <div className="py-1">
                   {sortedConversations.length === 0 && (
                     <div className="px-3 py-8 text-center">
@@ -987,7 +988,7 @@ export default function AiChat() {
           )}
 
       {/* Messages */}
-      <ScrollArea className="flex-1" ref={scrollAreaRef}>
+      <ScrollArea className="flex-1 min-h-0" ref={scrollAreaRef}>
         <div className="p-5 space-y-4 max-w-2xl mx-auto">
           {messages.map((msg) => (
             <div
@@ -1090,12 +1091,15 @@ export default function AiChat() {
                     </div>
                   )}
                   {msg.content && msg.content !== "(image)" && (
-                    <p className="whitespace-pre-wrap">
-                      {msg.content}
-                      {msg.isStreaming && (
-                        <span className="inline-block size-1.5 rounded-full bg-current align-middle ml-1 animate-pulse" />
-                      )}
-                    </p>
+                    msg.role === "assistant" ? (
+                      <div className="chat-markdown">
+                        <Markdown isStreaming={msg.isStreaming}>{msg.content}</Markdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">
+                        {msg.content}
+                      </p>
+                    )
                   )}
                 </div>
                 <div className="flex items-center gap-1.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1235,7 +1239,7 @@ export default function AiChat() {
 
 // ─── System Prompt Builder ───────────────────────────────────
 function buildSystemPrompt(game: { name: string; developer: string; save_paths: string[]; notes: string } | null): string {
-  let prompt = "You are GameVault AI, the built-in assistant inside GameVault. You are a practical gaming assistant focused on what the user asks right now.\n\nProduct context:\n- GameVault is created by Ranit Bhowmick (ranitbhowmick.com)\n- Support email: mail@ranitbhowmick.com\n\nPrimary role:\n- Help with game mechanics, quests, item descriptions, progression tips, builds, and troubleshooting\n- Help with save-related topics only when the user asks about saves/backups/restores\n- Provide clear, actionable, game-focused guidance\n\nBehavior rules:\n- If the user greets or sends a short opener, reply naturally and ask what they need\n- Do not jump into backup/save instructions unless directly requested\n- Be concise, accurate, and practical\n- Use markdown when it improves readability\n- If uncertain, say so clearly and give a safe next step\n- Do not fabricate game facts";
+  let prompt = "You are GameVault AI, the built-in assistant inside GameVault. You are a practical gaming assistant focused on what the user asks right now.\n\nProduct context:\n- GameVault is created by Ranit Bhowmick (ranitbhowmick.com)\n- Support email: mail@ranitbhowmick.com\n\nPrimary role:\n- Help with game mechanics, quests, item descriptions, progression tips, builds, and troubleshooting\n- Help with save-related topics only when the user asks about saves/backups/restores\n- Provide clear, actionable, game-focused guidance\n\nBehavior rules:\n- If the user greets or sends a short opener, reply naturally and ask what they need\n- Do not jump into backup/save instructions unless directly requested\n- Be concise, accurate, and practical\n- Use markdown when it improves readability\n- If uncertain, say so clearly and give a safe next step\n- Do not fabricate game facts\n\nIMPORTANT - Formatting Rules:\n- Mathematical expressions: ALWAYS use double dollar signs ($$) for both inline and block math. Never use single $.\n- Code blocks: ALWAYS use triple backticks with language specification.\n- Tables: Use standard markdown table syntax.\n- Use headers, lists, and bold/italic for clear structure.";
 
   if (game) {
     prompt += `\n\nThe user is currently working with the game: "${game.name}" by ${game.developer}.`;

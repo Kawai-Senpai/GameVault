@@ -100,6 +100,40 @@ export interface Screenshot {
   captured_at: string;
 }
 
+// ─── Recording Types ────────────────────────────────────────
+
+export interface Recording {
+  id: string;
+  game_id: string;
+  file_path: string;
+  thumbnail_path: string;
+  title: string;
+  description: string;
+  tags: string[];
+  width: number;
+  height: number;
+  file_size: number;
+  duration_seconds: number;
+  fps: number;
+  recorded_at: string;
+}
+
+export interface RecordingResult {
+  id: string;
+  file_path: string;
+  thumbnail_path: string;
+  width: number;
+  height: number;
+  file_size: number;
+  duration_seconds: number;
+}
+
+export interface RecordingStatus {
+  is_recording: boolean;
+  duration_seconds: number;
+  output_path: string;
+}
+
 // ─── Key Mapping Types ───────────────────────────────────────
 
 export interface KeyMapping {
@@ -165,6 +199,14 @@ export interface AppSettings {
   screenshot_shortcut: string;
   quick_backup_shortcut: string;
   setup_complete: boolean;
+
+  // Recording settings
+  recordings_directory: string;
+  recording_fps: number;
+  recording_resolution: string;
+  recording_quality: string;
+  recording_shortcut: string;
+  ffmpeg_path: string;
 
   // Backup settings
   auto_backup_enabled: boolean;

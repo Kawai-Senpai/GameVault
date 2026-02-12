@@ -30,14 +30,17 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import GameCover from "@/components/GameCover";
-import type { Game } from "@/types";
+import type { Game, DetectedGame } from "@/types";
+import { toast } from "sonner";
+import { invoke } from "@tauri-apps/api/core";
+import gamesDatabase from "@/data/games.json";
 
 type ViewMode = "grid" | "list";
 type SortMode = "name" | "recent" | "developer" | "favorite";
 
 export default function Library() {
   const navigate = useNavigate();
-  const { games, setSelectedGameId, isLoading } = useApp();
+  const { games, setSelectedGameId, isLoading, refreshGames } = useApp();
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sortMode, setSortMode] = useState<SortMode>("name");
@@ -86,8 +89,50 @@ export default function Library() {
 
   const handleDetectGames = async () => {
     setIsDetecting(true);
-    // Detection will be triggered from the parent
-    setTimeout(() => setIsDetecting(false), 2000);
+    try {
+      const detected = await invoke<DetectedGame[]>("detect_installed_games", {
+        gamesJson: JSON.stringify(gamesDatabase),
+      });
+      if (!detected || detected.length === 0) {
+        toast.info("No games found on your system");
+        setIsDetecting(false);
+        return;
+      }
+      // Filter out already-added games
+      const existingIds = new Set(games.map((g) => g.id));
+      const newGames = detected.filter((g) => !existingIds.has(g.id));
+      if (newGames.length === 0) {
+        toast.info("All detected games are already in your library");
+        setIsDetecting(false);
+        return;
+      }
+      // Import all detected games into DB
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      let added = 0;
+      for (const g of newGames) {
+        try {
+          await conn.execute(
+            `INSERT OR IGNORE INTO games (id, name, developer, steam_appid, cover_url, header_url, save_paths, extensions, notes, is_custom, is_detected, added_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, 1, datetime('now'), datetime('now'))`,
+            [
+              g.id, g.name, g.developer || "", g.steam_appid || null,
+              g.cover_url || null, g.header_url || null,
+              JSON.stringify(g.save_paths || []),
+              JSON.stringify(g.extensions || []),
+              g.notes || "",
+            ]
+          );
+          added++;
+        } catch { /* skip duplicates */ }
+      }
+      await refreshGames();
+      toast.success(`Detected ${added} new game${added !== 1 ? "s" : ""}!`);
+    } catch (err) {
+      toast.error(`Detection failed: ${err}`);
+    } finally {
+      setIsDetecting(false);
+    }
   };
 
   if (isLoading) {

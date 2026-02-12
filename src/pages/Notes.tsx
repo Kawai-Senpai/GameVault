@@ -337,7 +337,7 @@ export default function Notes() {
   const archivedCount = useMemo(() => notes.filter((n) => n.is_archived).length, [notes]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <Header
         title="Notes"
         description={`${notes.length} note${notes.length !== 1 ? "s" : ""} across ${Object.keys(gamesWithNotes).length} game${Object.keys(gamesWithNotes).length !== 1 ? "s" : ""}`}
@@ -420,7 +420,7 @@ export default function Notes() {
       </div>
 
       {/* Notes grid */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-5">
           {isLoading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

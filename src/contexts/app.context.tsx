@@ -42,6 +42,7 @@ interface AppContextValue {
   selectedGameId: string | null;
   setSelectedGameId: (id: string | null) => void;
   selectedGame: Game | null;
+  refreshGames: () => Promise<void>;
 
   // Settings
   settings: AppSettings;
@@ -79,6 +80,12 @@ const defaultSettings: AppSettings = {
   screenshot_shortcut: "F12",
   quick_backup_shortcut: "Ctrl+Shift+B",
   setup_complete: false,
+  recordings_directory: "",
+  recording_fps: 30,
+  recording_resolution: "native",
+  recording_quality: "medium",
+  recording_shortcut: "F9",
+  ffmpeg_path: "ffmpeg",
   auto_backup_enabled: true,
   auto_backup_interval_minutes: 1440,
   max_backups_per_game: 10,
@@ -104,6 +111,7 @@ const NUMBER_KEYS: Set<string> = new Set([
   "auto_backup_interval_minutes",
   "max_backups_per_game",
   "overlay_opacity",
+  "recording_fps",
 ]);
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -130,6 +138,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Key mappings & macros state for the key engine
   const [activeKeyMappings, setActiveKeyMappings] = useState<KeyMapping[]>([]);
   const [activeMacros, setActiveMacros] = useState<Macro[]>([]);
+
+  // Reusable games loader
+  const refreshGames = useCallback(async () => {
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      const rows = (await conn.select("SELECT * FROM games ORDER BY is_favorite DESC, name ASC")) as Record<string, unknown>[];
+      const mapped: Game[] = rows.map((r) => ({
+        id: r.id as string,
+        name: r.name as string,
+        developer: (r.developer as string) || "",
+        steam_appid: r.steam_appid as string | null,
+        cover_url: r.cover_url as string | null,
+        header_url: r.header_url as string | null,
+        custom_cover_path: r.custom_cover_path as string | null,
+        custom_header_path: r.custom_header_path as string | null,
+        save_paths: JSON.parse((r.save_paths as string) || "[]"),
+        extensions: JSON.parse((r.extensions as string) || "[]"),
+        notes: (r.notes as string) || "",
+        exe_path: r.exe_path as string | null,
+        is_custom: Boolean(r.is_custom),
+        is_detected: Boolean(r.is_detected),
+        is_favorite: Boolean(r.is_favorite),
+        auto_backup_disabled: Boolean(r.auto_backup_disabled),
+        play_count: (r.play_count as number) || 0,
+        total_playtime_seconds: (r.total_playtime_seconds as number) || 0,
+        last_played_at: r.last_played_at as string | null,
+        added_at: r.added_at as string,
+        updated_at: r.updated_at as string,
+      }));
+      setGames(mapped);
+    } catch (err) {
+      console.error("Failed to load games:", err);
+    }
+  }, []);
 
   // Detect if this is the overlay window (don't run key engine in overlay)
   const isOverlay = typeof window !== "undefined" && (
@@ -250,6 +293,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             } catch (e) { console.error("[Shortcut] backup:", e); }
           },
         },
+        {
+          combo: settings.recording_shortcut,
+          action: async () => {
+            try {
+              const status = await invoke<{ is_recording: boolean }>("get_recording_status");
+              if (status.is_recording) {
+                const result = await invoke<{
+                  id: string;
+                  file_path: string;
+                  thumbnail_path: string;
+                  width: number;
+                  height: number;
+                  file_size: number;
+                  duration_seconds: number;
+                }>("stop_recording");
+                // Save to database
+                const db = await import("@tauri-apps/plugin-sql");
+                const conn = await db.default.load("sqlite:gamevault.db");
+                await conn.execute(
+                  `INSERT INTO recordings (id, game_id, file_path, thumbnail_path, width, height, file_size, duration_seconds, fps, recorded_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, datetime('now'))`,
+                  [
+                    result.id, selectedGameId || "_general", result.file_path, result.thumbnail_path,
+                    result.width, result.height, result.file_size,
+                    result.duration_seconds, settings.recording_fps || 30,
+                  ]
+                );
+                toast.success("Recording saved!");
+              } else {
+                const recDir = settings.recordings_directory || settings.screenshots_directory;
+                if (!recDir) { toast.error("Set recordings directory in Settings"); return; }
+                // Resolve best ffmpeg path (user → bundled → system)
+                const ffmpegPath = await invoke<string>("resolve_ffmpeg", { userPath: settings.ffmpeg_path || null });
+                await invoke<string>("start_recording", {
+                  recordingsDir: recDir,
+                  gameId: selectedGameId || "_general",
+                  ffmpegPath,
+                  fps: settings.recording_fps || 30,
+                  resolution: settings.recording_resolution === "native" ? null : settings.recording_resolution,
+                  quality: settings.recording_quality || "medium",
+                });
+                toast.success("Recording started!");
+              }
+            } catch (e: any) { toast.error(`Recording: ${e}`); }
+          },
+        },
       ];
 
       for (const { combo, action } of shortcuts) {
@@ -293,8 +382,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     settings.overlay_shortcut,
     settings.screenshot_shortcut,
     settings.quick_backup_shortcut,
+    settings.recording_shortcut,
     settings.backup_directory,
     settings.screenshots_directory,
+    settings.recordings_directory,
     selectedGameId,
     games,
   ]);
@@ -621,49 +712,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Load games from SQLite
   useEffect(() => {
-    const loadGames = async () => {
-      try {
-        const db = await import("@tauri-apps/plugin-sql");
-        const conn = await db.default.load("sqlite:gamevault.db");
-
-        const rows = (await conn.select("SELECT * FROM games ORDER BY is_favorite DESC, name ASC")) as Record<
-          string,
-          unknown
-        >[];
-
-        const mapped: Game[] = rows.map((r) => ({
-          id: r.id as string,
-          name: r.name as string,
-          developer: (r.developer as string) || "",
-          steam_appid: r.steam_appid as string | null,
-          cover_url: r.cover_url as string | null,
-          header_url: r.header_url as string | null,
-          custom_cover_path: r.custom_cover_path as string | null,
-          custom_header_path: r.custom_header_path as string | null,
-          save_paths: JSON.parse((r.save_paths as string) || "[]"),
-          extensions: JSON.parse((r.extensions as string) || "[]"),
-          notes: (r.notes as string) || "",
-          exe_path: r.exe_path as string | null,
-          is_custom: Boolean(r.is_custom),
-          is_detected: Boolean(r.is_detected),
-          is_favorite: Boolean(r.is_favorite),
-          auto_backup_disabled: Boolean(r.auto_backup_disabled),
-          play_count: (r.play_count as number) || 0,
-          total_playtime_seconds: (r.total_playtime_seconds as number) || 0,
-          last_played_at: r.last_played_at as string | null,
-          added_at: r.added_at as string,
-          updated_at: r.updated_at as string,
-        }));
-
-        setGames(mapped);
-      } catch (err) {
-        console.error("Failed to load games:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    loadGames();
-  }, []);
+    refreshGames().finally(() => setIsLoading(false));
+  }, [refreshGames]);
 
   // ── Background sync: fetch game database from GitHub and merge new entries ──
   useEffect(() => {
@@ -732,31 +782,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (added > 0) {
           // Reload games from DB so UI reflects the new additions
-          const rows = (await conn.select("SELECT * FROM games ORDER BY is_favorite DESC, name ASC")) as Record<string, unknown>[];
-          const mapped: Game[] = rows.map((r) => ({
-            id: r.id as string,
-            name: r.name as string,
-            developer: (r.developer as string) || "",
-            steam_appid: r.steam_appid as string | null,
-            cover_url: r.cover_url as string | null,
-            header_url: r.header_url as string | null,
-            custom_cover_path: r.custom_cover_path as string | null,
-            custom_header_path: r.custom_header_path as string | null,
-            save_paths: JSON.parse((r.save_paths as string) || "[]"),
-            extensions: JSON.parse((r.extensions as string) || "[]"),
-            notes: (r.notes as string) || "",
-            exe_path: r.exe_path as string | null,
-            is_custom: Boolean(r.is_custom),
-            is_detected: Boolean(r.is_detected),
-            is_favorite: Boolean(r.is_favorite),
-            auto_backup_disabled: Boolean(r.auto_backup_disabled),
-            play_count: (r.play_count as number) || 0,
-            total_playtime_seconds: (r.total_playtime_seconds as number) || 0,
-            last_played_at: r.last_played_at as string | null,
-            added_at: r.added_at as string,
-            updated_at: r.updated_at as string,
-          }));
-          setGames(mapped);
+          await refreshGames();
           console.log(`[GameVault] Synced ${added} new game(s) from remote database`);
         }
       } catch (err) {
@@ -1174,22 +1200,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     let unlistenBackup: (() => void) | null = null;
     let unlistenScreenshot: (() => void) | null = null;
+    let unlistenRecording: (() => void) | null = null;
     listen("tray-quick-backup", onQuickBackup).then((fn) => {
       unlistenBackup = fn;
     });
     listen("tray-take-screenshot", onTakeScreenshot).then((fn) => {
       unlistenScreenshot = fn;
     });
+    listen("tray-toggle-recording", async () => {
+      try {
+        const status = await invoke<{ is_recording: boolean }>("get_recording_status");
+        if (status.is_recording) {
+          const result = await invoke<{
+            id: string; file_path: string; thumbnail_path: string;
+            width: number; height: number; file_size: number; duration_seconds: number;
+          }>("stop_recording");
+          const db = await import("@tauri-apps/plugin-sql");
+          const conn = await db.default.load("sqlite:gamevault.db");
+          await conn.execute(
+            `INSERT INTO recordings (id, game_id, file_path, thumbnail_path, width, height, file_size, duration_seconds, fps, recorded_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, datetime('now'))`,
+            [result.id, selectedGameId || "_general", result.file_path, result.thumbnail_path,
+             result.width, result.height, result.file_size, result.duration_seconds, settings.recording_fps || 30]
+          );
+          toast.success("Recording saved!");
+        } else {
+          const recDir = settings.recordings_directory || settings.screenshots_directory;
+          if (!recDir) { toast.error("Set recordings directory in Settings"); return; }
+          const ffmpegPath = await invoke<string>("resolve_ffmpeg", { userPath: settings.ffmpeg_path || null });
+          await invoke<string>("start_recording", {
+            recordingsDir: recDir, gameId: selectedGameId || "_general",
+            ffmpegPath, fps: settings.recording_fps || 30,
+            resolution: settings.recording_resolution === "native" ? null : settings.recording_resolution,
+            quality: settings.recording_quality || "medium",
+          });
+          toast.success("Recording started!");
+        }
+      } catch (e: any) { toast.error(`Recording: ${e}`); }
+    }).then((fn) => {
+      unlistenRecording = fn;
+    });
 
     return () => {
       unlistenBackup?.();
       unlistenScreenshot?.();
+      unlistenRecording?.();
     };
   }, [
     games,
     selectedGameId,
     settings.backup_directory,
     settings.screenshots_directory,
+    settings.recordings_directory,
   ]);
 
   const updateSetting = useCallback(
@@ -1254,6 +1316,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         selectedGameId,
         setSelectedGameId,
         selectedGame,
+        refreshGames,
         settings,
         setSettings,
         updateSetting,

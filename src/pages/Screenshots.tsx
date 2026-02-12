@@ -142,7 +142,7 @@ export default function Screenshots() {
   ];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <Header
         title="Screenshots"
         description={`${screenshots.length} screenshots captured`}
@@ -205,7 +205,7 @@ export default function Screenshots() {
       </div>
 
       {/* Content */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {isLoading ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 p-5">
             {Array.from({ length: 6 }).map((_, i) => (

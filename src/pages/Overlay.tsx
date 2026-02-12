@@ -25,6 +25,7 @@ import {
   Send,
   StickyNote,
   Swords,
+  Video,
   X,
 } from "lucide-react";
 import { cn, formatBytes, formatRelativeTime } from "@/lib/utils";
@@ -75,6 +76,8 @@ export default function Overlay() {
   const [restoreConfirm, setRestoreConfirm] = useState(false);
   const [screenshotBusy, setScreenshotBusy] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
   const [overlayWizard, setOverlayWizard] = useState<null | "game" | "screenshot-dir" | "backup-dir" | "save-paths">(null);
   const [successCard, setSuccessCard] = useState<{ action: string; info: string } | null>(null);
 
@@ -527,6 +530,161 @@ export default function Overlay() {
     }
   };
 
+  // ── Recording ─────────────────────────────────────────
+  const recordingTimerRef = useRef<number | null>(null);
+
+  // Sync recording state on mount + listen for events from global shortcut
+  useEffect(() => {
+    // Check if recording is already in progress (started via global shortcut)
+    const syncState = async () => {
+      try {
+        const status = await invoke<{ is_recording: boolean; duration_seconds: number }>("get_recording_status");
+        if (status.is_recording) {
+          setIsRecording(true);
+          setRecordingDuration(Math.floor(status.duration_seconds));
+          // Start counting from current duration
+          if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = window.setInterval(() => {
+            setRecordingDuration((d) => d + 1);
+          }, 1000);
+        }
+      } catch { /* ignore */ }
+    };
+    syncState();
+
+    // Listen for recording state changes from other windows / global shortcut
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      try {
+        const { listen } = await import("@tauri-apps/api/event");
+        unlisten = await listen<{ is_recording: boolean }>("recording-state-changed", (event) => {
+          if (event.payload.is_recording) {
+            setIsRecording(true);
+            setRecordingDuration(0);
+            if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+            recordingTimerRef.current = window.setInterval(() => {
+              setRecordingDuration((d) => d + 1);
+            }, 1000);
+          } else {
+            setIsRecording(false);
+            setRecordingDuration(0);
+            if (recordingTimerRef.current) {
+              clearInterval(recordingTimerRef.current);
+              recordingTimerRef.current = null;
+            }
+          }
+        });
+      } catch { /* ignore */ }
+    })();
+
+    return () => {
+      if (unlisten) unlisten();
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    };
+  }, []);
+
+  const handleToggleRecording = async () => {
+    if (isRecording) {
+      // Stop recording
+      showStatus("Stopping recording...");
+      try {
+        const result = await invoke<{
+          id: string;
+          file_path: string;
+          thumbnail_path: string;
+          width: number;
+          height: number;
+          file_size: number;
+          duration_seconds: number;
+        }>("stop_recording");
+
+        setIsRecording(false);
+        setRecordingDuration(0);
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+
+        // Save to DB
+        const game = await ensureGame();
+        const gameId = game?.id || "_general";
+        const db = await import("@tauri-apps/plugin-sql");
+        const conn = await db.default.load("sqlite:gamevault.db");
+        await conn.execute(
+          `INSERT INTO recordings (id, game_id, file_path, thumbnail_path, width, height, file_size, duration_seconds, fps, recorded_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, datetime('now'))`,
+          [
+            result.id, gameId, result.file_path, result.thumbnail_path,
+            result.width, result.height, result.file_size,
+            result.duration_seconds, settings.recording_fps,
+          ]
+        );
+
+        const durStr = result.duration_seconds >= 60
+          ? `${Math.floor(result.duration_seconds / 60)}m ${Math.floor(result.duration_seconds % 60)}s`
+          : `${Math.floor(result.duration_seconds)}s`;
+        showSuccess("recording", `${durStr} · ${result.width}×${result.height} · ${formatBytes(result.file_size)}`);
+        toast.success("Recording saved");
+      } catch (err) {
+        toast.error(`Stop recording failed: ${err}`);
+        setIsRecording(false);
+        setRecordingDuration(0);
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+      }
+    } else {
+      // Start recording
+      const recDir = settings.recordings_directory || settings.screenshots_directory;
+      if (!recDir) {
+        showWizard("screenshot-dir");
+        toast.error("Set a screenshots or recordings directory first");
+        return;
+      }
+
+      // Try to get game but don't block recording if no game selected
+      let gameId = "_general";
+      try {
+        const game = await ensureGame();
+        if (game) gameId = game.id;
+      } catch { /* use _general */ }
+
+      try {
+        // Resolve best ffmpeg path (user → bundled → system)
+        const ffmpegPath = await invoke<string>("resolve_ffmpeg", { userPath: settings.ffmpeg_path || null });
+        await invoke<string>("start_recording", {
+          recordingsDir: recDir,
+          gameId,
+          ffmpegPath,
+          fps: settings.recording_fps || 30,
+          resolution: settings.recording_resolution === "native" ? null : settings.recording_resolution,
+          quality: settings.recording_quality || "medium",
+        });
+
+        setIsRecording(true);
+        setRecordingDuration(0);
+        showStatus("Recording started");
+        toast.success("Recording started");
+
+        // Start duration timer
+        const startTime = Date.now();
+        recordingTimerRef.current = window.setInterval(() => {
+          setRecordingDuration(Math.floor((Date.now() - startTime) / 1000));
+        }, 1000);
+      } catch (err) {
+        toast.error(`Start recording failed: ${err}`);
+      }
+    }
+  };
+
+  // Cleanup recording timer on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    };
+  }, []);
+
   const handleQuickBackup = async () => {
     setOverlayWizard(null);
     setSuccessCard(null);
@@ -823,6 +981,12 @@ export default function Overlay() {
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
           <StripBtn icon={<Camera className="size-3" />} title="Screenshot" onClick={handleScreenshot} loading={screenshotBusy} />
+          <StripBtn
+            icon={<Video className={cn("size-3", isRecording && "text-red-400")} />}
+            title={isRecording ? `Recording ${Math.floor(recordingDuration / 60)}:${String(recordingDuration % 60).padStart(2, '0')}` : "Record"}
+            onClick={handleToggleRecording}
+            className={isRecording ? "!bg-red-500/30 animate-pulse" : ""}
+          />
           <StripBtn icon={<Archive className="size-3" />} title="Backup" onClick={handleQuickBackup} loading={backupBusy} />
           <StripBtn
             icon={<RotateCcw className="size-3" />}
@@ -1582,12 +1746,14 @@ function StripBtn({
   onClick,
   disabled = false,
   loading = false,
+  className: extraClassName,
 }: {
   icon: React.ReactNode;
   title: string;
   onClick: () => void;
   disabled?: boolean;
   loading?: boolean;
+  className?: string;
 }) {
   return (
     <button
@@ -1595,7 +1761,8 @@ function StripBtn({
         "size-7 flex items-center justify-center rounded-md transition-all",
         disabled || loading
           ? "opacity-25 cursor-not-allowed"
-          : "text-white/50 hover:text-white hover:bg-white/10 active:scale-95"
+          : "text-white/50 hover:text-white hover:bg-white/10 active:scale-95",
+        extraClassName
       )}
       onClick={disabled || loading ? undefined : () => void onClick()}
       title={title}

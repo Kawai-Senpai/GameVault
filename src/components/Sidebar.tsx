@@ -27,6 +27,7 @@ import {
   FolderOpen,
   StickyNote,
   Activity,
+  Video,
 } from "lucide-react";
 import { cn, truncateText } from "@/lib/utils";
 import GameCover from "@/components/GameCover";
@@ -58,6 +59,7 @@ export default function Sidebar() {
   const navItems: NavItem[] = [
     { path: "/", label: "Library", icon: <Library className="size-3.5" /> },
     { path: "/screenshots", label: "Screenshots", icon: <Camera className="size-3.5" /> },
+    { path: "/recordings", label: "Recordings", icon: <Video className="size-3.5" /> },
     { path: "/key-mapper", label: "Key Mapper", icon: <Keyboard className="size-3.5" /> },
     { path: "/macros", label: "Macros", icon: <Zap className="size-3.5" /> },
     { path: "/performance", label: "Performance", icon: <Activity className="size-3.5" /> },

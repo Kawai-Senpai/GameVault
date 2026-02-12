@@ -43,6 +43,7 @@ import {
   HardDrive,
   FileArchive,
   Check,
+  Video,
 } from "lucide-react";
 import type { AppSettings } from "@/types";
 import { Slider } from "@/components/ui/slider";
@@ -183,7 +184,7 @@ export default function Settings() {
     }
   };
 
-  const handlePickDir = async (field: "backup_directory" | "screenshots_directory") => {
+  const handlePickDir = async (field: "backup_directory" | "screenshots_directory" | "recordings_directory") => {
     try {
       const folder = await invoke<string | null>("pick_folder_path", {
         title: `Select ${field === "backup_directory" ? "Backup" : "Screenshots"} Directory`,
@@ -311,10 +312,10 @@ export default function Settings() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <Header title="Settings" description="Configure GameVault to your liking" />
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-5 max-w-xl space-y-4 pb-16">
           {/* ── Appearance ────────────────────────────────────── */}
           <Card>
@@ -580,7 +581,12 @@ export default function Settings() {
                 <div>
                   <Label className="text-[10px]">Auto-Backup</Label>
                   <p className="text-[9px] text-muted-foreground">
-                    Automatically back up game saves
+                    Automatically back up game saves periodically
+                  </p>
+                  <p className="text-[8px] text-muted-foreground/60 mt-0.5">
+                    {settings.auto_backup_enabled
+                      ? "Individual games can be excluded from their detail page"
+                      : "When off, no games will be auto-backed up regardless of per-game settings"}
                   </p>
                 </div>
                 <Switch
@@ -705,6 +711,158 @@ export default function Settings() {
                   placeholder="Ctrl+Shift+S"
                   className="mt-1 w-48 font-mono text-[10px]"
                 />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ── Screen Recording ──────────────────────────────── */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Video className="size-3.5" /> Screen Recording
+              </CardTitle>
+              <CardDescription className="text-[9px]">
+                Record gameplay using FFmpeg. If FFmpeg is missing, you can auto-download it below.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <Label className="text-[10px]">Recordings Directory</Label>
+                <div className="flex gap-1.5 mt-1">
+                  <Input
+                    value={settings.recordings_directory}
+                    readOnly
+                    className="flex-1 text-[10px]"
+                    placeholder="Not set — uses screenshots directory"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={() => handlePickDir("recordings_directory")}
+                  >
+                    <FolderOpen className="size-3.5" />
+                  </Button>
+                </div>
+                <p className="text-[8px] text-muted-foreground mt-0.5">
+                  If empty, recordings are saved in the screenshots directory.
+                </p>
+              </div>
+              <div>
+                <Label className="text-[10px]">FFmpeg Path</Label>
+                <div className="flex gap-1.5 mt-1">
+                  <Input
+                    value={settings.ffmpeg_path}
+                    onChange={(e) => handleUpdate("ffmpeg_path", e.target.value)}
+                    placeholder="ffmpeg"
+                    className="flex-1 font-mono text-[10px]"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 text-[9px]"
+                    onClick={async () => {
+                      try {
+                        const ver = await invoke<string>("check_ffmpeg", { ffmpegPath: settings.ffmpeg_path || null });
+                        toast.success(`FFmpeg detected: ${ver}`);
+                      } catch (err: any) {
+                        toast.error(err?.toString() || "FFmpeg not found");
+                      }
+                    }}
+                  >
+                    <Check className="size-3 mr-1" /> Verify
+                  </Button>
+                </div>
+                <p className="text-[8px] text-muted-foreground mt-0.5">
+                  Path to ffmpeg executable. Leave as "ffmpeg" if it's in your PATH.
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-1.5 text-[9px] w-full"
+                  onClick={async () => {
+                    const toastId = toast.loading("Downloading FFmpeg (~80MB)... This may take a minute.");
+                    try {
+                      const path = await invoke<string>("download_ffmpeg");
+                      await handleUpdate("ffmpeg_path", path);
+                      toast.success("FFmpeg downloaded and configured!", { id: toastId });
+                    } catch (err: any) {
+                      toast.error(err?.toString() || "Download failed", { id: toastId });
+                    }
+                  }}
+                >
+                  <Download className="size-3 mr-1.5" />
+                  {settings.ffmpeg_path && settings.ffmpeg_path !== "ffmpeg"
+                    ? "Re-download FFmpeg"
+                    : "Auto-download FFmpeg (recommended)"}
+                </Button>
+                <p className="text-[8px] text-muted-foreground mt-0.5">
+                  Downloads a portable FFmpeg build (~80MB) to the app data folder.
+                  No installation required. Alternatively, install FFmpeg yourself and set the path above.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-[10px]">Frame Rate (FPS)</Label>
+                  <Select
+                    value={String(settings.recording_fps)}
+                    onValueChange={(v) => handleUpdate("recording_fps", parseInt(v))}
+                  >
+                    <SelectTrigger className="mt-1 text-[10px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="15">15 FPS</SelectItem>
+                      <SelectItem value="24">24 FPS</SelectItem>
+                      <SelectItem value="30">30 FPS</SelectItem>
+                      <SelectItem value="60">60 FPS</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-[10px]">Quality</Label>
+                  <Select
+                    value={settings.recording_quality}
+                    onValueChange={(v) => handleUpdate("recording_quality", v)}
+                  >
+                    <SelectTrigger className="mt-1 text-[10px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low (fast encoding)</SelectItem>
+                      <SelectItem value="medium">Medium (balanced)</SelectItem>
+                      <SelectItem value="high">High (best quality)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-[10px]">Resolution</Label>
+                  <Select
+                    value={settings.recording_resolution}
+                    onValueChange={(v) => handleUpdate("recording_resolution", v)}
+                  >
+                    <SelectTrigger className="mt-1 text-[10px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="native">Native (full screen)</SelectItem>
+                      <SelectItem value="1920x1080">1920×1080 (1080p)</SelectItem>
+                      <SelectItem value="1280x720">1280×720 (720p)</SelectItem>
+                      <SelectItem value="854x480">854×480 (480p)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-[10px]">Record Shortcut</Label>
+                  <Input
+                    value={settings.recording_shortcut}
+                    onChange={(e) => handleUpdate("recording_shortcut", e.target.value)}
+                    placeholder="F9"
+                    className="mt-1 font-mono text-[10px]"
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>

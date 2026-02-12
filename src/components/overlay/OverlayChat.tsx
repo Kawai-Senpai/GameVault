@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { Bot, Camera, Globe, ImageIcon, Loader2, Send, Sparkles, Trash2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Markdown } from "@/components/Markdown";
 import type { AppSettings } from "@/types";
 
 interface ChatMsg {
@@ -540,12 +541,15 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
                   </div>
                 )}
                 {msg.content && msg.content !== "(screenshot)" && (
-                  <p className="whitespace-pre-wrap break-words">
-                    {msg.content}
-                    {msg.isStreaming && (
-                      <span className="inline-block size-1 rounded-full bg-current align-middle ml-1 animate-pulse" />
-                    )}
-                  </p>
+                  msg.role === "assistant" ? (
+                    <div className="chat-markdown text-[10px]">
+                      <Markdown isStreaming={msg.isStreaming}>{msg.content}</Markdown>
+                    </div>
+                  ) : (
+                    <p className="whitespace-pre-wrap break-words">
+                      {msg.content}
+                    </p>
+                  )
                 )}
               </div>
               {msg.role === "user" && (

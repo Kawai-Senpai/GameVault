@@ -4,6 +4,7 @@ import Library from "@/pages/Library";
 import GameDetail from "@/pages/GameDetail";
 import AddGame from "@/pages/AddGame";
 import Screenshots from "@/pages/Screenshots";
+import Recordings from "@/pages/Recordings";
 import KeyMapper from "@/pages/KeyMapper";
 import Macros from "@/pages/Macros";
 import AiChat from "@/pages/AiChat";
@@ -51,6 +52,7 @@ export default function AppRoutes() {
           <Route path="/game/:gameId" element={<GameDetail />} />
           <Route path="/add-game" element={<AddGame />} />
           <Route path="/screenshots" element={<Screenshots />} />
+          <Route path="/recordings" element={<Recordings />} />
           <Route path="/key-mapper" element={<KeyMapper />} />
           <Route path="/macros" element={<Macros />} />
           <Route path="/ai-chat" element={<AiChat />} />

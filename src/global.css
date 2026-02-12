@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+@source "node_modules/streamdown/dist/**/*.{js,ts,jsx,tsx}";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -307,4 +309,109 @@ input, textarea, select {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: var(--radius);
+}
+
+/* ─── Streamdown / Markdown ───────────────────────────────────── */
+[data-streamdown="code-block"] code {
+  color: inherit !important;
+  font-size: 0.7rem !important;
+  line-height: 1.5 !important;
+}
+
+.dark [data-streamdown="code-block"] code span {
+  color: var(--shiki-dark) !important;
+}
+
+.dark [data-streamdown="code-block"] code {
+  color: oklch(0.93 0 0) !important;
+}
+
+[data-streamdown="code-block"],
+[data-streamdown="table"] {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+}
+
+[data-streamdown="code-block"] pre,
+[data-streamdown="code-block"] code {
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  word-wrap: break-word !important;
+  white-space: pre-wrap !important;
+}
+
+/* KaTeX overrides for small chat bubbles */
+.katex {
+  font-size: 0.85em !important;
+}
+
+.katex-display {
+  margin: 0.5em 0 !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+
+/* Markdown content inside chat bubbles */
+.chat-markdown p {
+  margin: 0.25em 0;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0.25em 0;
+  padding-left: 1.25em;
+}
+
+.chat-markdown li {
+  margin: 0.1em 0;
+}
+
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4 {
+  margin: 0.5em 0 0.25em;
+  font-weight: 600;
+}
+
+.chat-markdown h1 { font-size: 1.1em; }
+.chat-markdown h2 { font-size: 1em; }
+.chat-markdown h3 { font-size: 0.95em; }
+.chat-markdown h4 { font-size: 0.9em; }
+
+.chat-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.75em;
+  margin: 0.25em 0;
+  opacity: 0.85;
+}
+
+.chat-markdown code:not([data-streamdown]) {
+  background: rgb(from var(--muted-foreground) r g b / 0.1);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+.chat-markdown table {
+  border-collapse: collapse;
+  font-size: 0.8em;
+  margin: 0.5em 0;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.25em 0.5em;
+}
+
+.chat-markdown th {
+  background: rgb(from var(--muted) r g b / 0.5);
+  font-weight: 600;
+}
+
+.chat-markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.5em 0;
 }
