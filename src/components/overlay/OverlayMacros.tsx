@@ -152,7 +152,7 @@ export default function OverlayMacros({ gameId }: Props) {
                   <div className="min-w-0 flex-1">
                     <p className="text-[9px] font-medium truncate">{macro.name}</p>
                     <div className="flex items-center gap-1 text-[7px] text-white/40">
-                      <kbd className="px-1 py-0.5 rounded bg-white/10 text-[7px]">{macro.trigger_key || "—"}</kbd>
+                      <kbd className="px-1 py-0.5 rounded bg-white/10 text-[7px]">{macro.trigger_key || "-"}</kbd>
                       <ChevronRight className="size-2" />
                       <span>{macro.actions.length} action{macro.actions.length !== 1 ? "s" : ""}</span>
                       {macro.repeat_count > 1 && <span>×{macro.repeat_count}</span>}

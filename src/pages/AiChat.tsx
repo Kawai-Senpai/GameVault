@@ -26,8 +26,20 @@ import {
   Settings,
   Gamepad2,
   Info,
+  Camera,
+  Paperclip,
+  X,
+  ImageIcon,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+interface AttachedImage {
+  id: string;
+  name: string;
+  base64: string; // raw base64 (no data: prefix)
+  size: number;
+}
 
 interface ChatMessage {
   id: string;
@@ -36,6 +48,7 @@ interface ChatMessage {
   timestamp: Date;
   webSearchUsed?: boolean;
   gameContext?: string;
+  images?: AttachedImage[]; // attached images
 }
 
 export default function AiChat() {
@@ -53,8 +66,12 @@ export default function AiChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [selectedGameId, setSelectedGameId] = useState<string>("none");
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [isCapturing, setIsCapturing] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const MAX_IMAGES = 5;
 
   const isOpenRouter = settings.ai_provider === "openrouter";
   const hasApiKey = !!settings.ai_api_key;
@@ -69,21 +86,93 @@ export default function AiChat() {
     }, 50);
   }, []);
 
+  // ── Image helpers ──
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(",")[1] || "";
+        resolve(base64);
+      };
+      reader.onerror = reject;
+    });
+
+  const addImageFile = async (file: File) => {
+    if (attachedImages.length >= MAX_IMAGES) {
+      toast.error(`Max ${MAX_IMAGES} images per message`);
+      return;
+    }
+    const base64 = await fileToBase64(file);
+    setAttachedImages((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: file.name, base64, size: file.size },
+    ]);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach((f) => {
+      if (f.type.startsWith("image/")) void addImageFile(f);
+    });
+    e.target.value = "";
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageItems = Array.from(items).filter((i) => i.type.startsWith("image/"));
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (file) await addImageFile(file);
+    }
+  };
+
+  const captureScreenshot = async () => {
+    if (isCapturing) return;
+    setIsCapturing(true);
+    try {
+      const raw = await invoke<string>("capture_screen");
+      // capture_screen returns full data URI, strip prefix if present
+      const base64 = raw.startsWith("data:") ? raw.split(",")[1] || raw : raw;
+      if (attachedImages.length >= MAX_IMAGES) {
+        toast.error(`Max ${MAX_IMAGES} images per message`);
+        return;
+      }
+      setAttachedImages((prev) => [
+        ...prev,
+        { id: Date.now().toString(), name: `screenshot_${Date.now()}.png`, base64, size: base64.length },
+      ]);
+      toast.success("Screenshot attached");
+    } catch (err) {
+      toast.error(`Capture failed: ${err}`);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || isLoading) return;
+    if ((!text && attachedImages.length === 0) || isLoading) return;
+
+    const capturedImages = [...attachedImages];
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       role: "user",
-      content: text,
+      content: text || (capturedImages.length > 0 ? "(image)" : ""),
       timestamp: new Date(),
       webSearchUsed: webSearchEnabled && isOpenRouter,
       gameContext: selectedGame?.name,
+      images: capturedImages.length > 0 ? capturedImages : undefined,
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setAttachedImages([]);
     setIsLoading(true);
     scrollToBottom();
 
@@ -112,9 +201,38 @@ export default function AiChat() {
           { role: "system", content: systemPrompt },
           ...messages
             .filter((m) => m.role !== "system" && m.id !== "intro")
-            .map((m) => ({ role: m.role, content: m.content })),
-          { role: "user", content: text },
+            .map((m) => {
+              if (m.images && m.images.length > 0) {
+                return {
+                  role: m.role,
+                  content: [
+                    ...(m.content && m.content !== "(image)" ? [{ type: "text" as const, text: m.content }] : []),
+                    ...m.images.map((img) => ({
+                      type: "image_url" as const,
+                      image_url: { url: `data:image/png;base64,${img.base64}` },
+                    })),
+                  ],
+                };
+              }
+              return { role: m.role, content: m.content };
+            }),
         ];
+
+        // Current message
+        if (capturedImages.length > 0) {
+          apiMessages.push({
+            role: "user",
+            content: [
+              ...(text ? [{ type: "text" as const, text }] : []),
+              ...capturedImages.map((img) => ({
+                type: "image_url" as const,
+                image_url: { url: `data:image/png;base64,${img.base64}` },
+              })),
+            ],
+          });
+        } else {
+          apiMessages.push({ role: "user", content: text });
+        }
 
         const res = await tauriFetch(apiUrl, {
           method: "POST",
@@ -352,7 +470,24 @@ export default function AiChat() {
                       : "bg-primary text-primary-foreground"
                   )}
                 >
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {/* Attached images */}
+                  {msg.images && msg.images.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-1.5">
+                      {msg.images.map((img) => (
+                        <div key={img.id} className="rounded-lg overflow-hidden border border-border/30 max-w-[180px]">
+                          <img
+                            src={`data:image/png;base64,${img.base64}`}
+                            alt={img.name}
+                            className="w-full h-auto max-h-[120px] object-cover"
+                            draggable={false}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {msg.content && msg.content !== "(image)" && (
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
@@ -392,16 +527,76 @@ export default function AiChat() {
 
       {/* Input */}
       <div className="px-5 py-3 border-t border-border">
-        <div className="max-w-2xl mx-auto flex gap-2">
+        {/* Attached images preview */}
+        {attachedImages.length > 0 && (
+          <div className="max-w-2xl mx-auto mb-2 flex items-center gap-2 flex-wrap">
+            {attachedImages.map((img) => (
+              <div key={img.id} className="relative group/thumb">
+                <div className="w-14 h-10 rounded-lg overflow-hidden border border-border bg-muted">
+                  <img
+                    src={`data:image/png;base64,${img.base64}`}
+                    alt={img.name}
+                    className="w-full h-full object-cover"
+                    draggable={false}
+                  />
+                </div>
+                <button
+                  className="absolute -top-1 -right-1 size-4 rounded-full bg-destructive flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity"
+                  onClick={() => setAttachedImages((p) => p.filter((i) => i.id !== img.id))}
+                >
+                  <X className="size-2.5 text-white" />
+                </button>
+              </div>
+            ))}
+            <span className="text-[8px] text-muted-foreground">
+              {attachedImages.length}/{MAX_IMAGES} images
+            </span>
+          </div>
+        )}
+
+        <div className="max-w-2xl mx-auto flex gap-2 items-center">
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+          {/* Attach file */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-9 shrink-0"
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach image"
+          >
+            <Paperclip className="size-3.5" />
+          </Button>
+          {/* Capture screenshot */}
+          <Button
+            variant={attachedImages.length > 0 ? "secondary" : "ghost"}
+            size="icon-sm"
+            className="size-9 shrink-0"
+            onClick={() => void captureScreenshot()}
+            disabled={isCapturing}
+            title="Capture screenshot"
+          >
+            {isCapturing ? <Loader2 className="size-3.5 animate-spin" /> : <Camera className="size-3.5" />}
+          </Button>
           <Input
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
-              selectedGame
-                ? `Ask about ${selectedGame.name}...`
-                : "Ask about save locations, backup tips, troubleshooting..."
+              attachedImages.length > 0
+                ? "Describe what you see or ask a question..."
+                : selectedGame
+                  ? `Ask about ${selectedGame.name}...`
+                  : "Ask about save locations, backup tips, troubleshooting..."
             }
             className="flex-1 h-9"
             disabled={isLoading}
@@ -409,7 +604,7 @@ export default function AiChat() {
           <Button
             size="sm"
             onClick={handleSend}
-            disabled={!input.trim() || isLoading}
+            disabled={(!input.trim() && attachedImages.length === 0) || isLoading}
             className="h-9 px-3"
           >
             <Send className="size-3" />
@@ -420,7 +615,7 @@ export default function AiChat() {
             ? `${settings.ai_provider} · ${settings.ai_model}${webSearchEnabled && isOpenRouter ? " :online" : ""}`
             : "Local responses only"
           }
-          {" · "}AI responses are for guidance. Always verify before modifying save files.
+          {" · "}Attach images with <ImageIcon className="inline size-2.5 -mt-0.5" /> or paste from clipboard
         </p>
       </div>
     </div>
@@ -454,16 +649,16 @@ function getLocalResponse(input: string): string {
   }
 
   if (lower.includes("backup") && (lower.includes("how") || lower.includes("tip") || lower.includes("strateg"))) {
-    return "**Backup best practices:**\n\n1. Back up before major updates or patches\n2. Use meaningful names — \"Before final boss\" > \"Backup 3\"\n3. Enable auto-backup in GameVault Settings\n4. Test restores occasionally\n5. Keep both cloud and local copies for redundancy";
+    return "**Backup best practices:**\n\n1. Back up before major updates or patches\n2. Use meaningful names - \"Before final boss\" > \"Backup 3\"\n3. Enable auto-backup in GameVault Settings\n4. Test restores occasionally\n5. Keep both cloud and local copies for redundancy";
   }
 
   if (lower.includes("corrupt") || lower.includes("broken") || lower.includes("fix")) {
-    return "**Fixing corrupted saves:**\n\n1. Check GameVault for a recent backup first\n2. Look for .bak or numbered save files in the same directory\n3. Check cloud saves (Steam Cloud, GOG Galaxy)\n4. Check auto-save slots — usually separate from manual saves\n5. Community tools exist for many games to repair or edit saves";
+    return "**Fixing corrupted saves:**\n\n1. Check GameVault for a recent backup first\n2. Look for .bak or numbered save files in the same directory\n3. Check cloud saves (Steam Cloud, GOG Galaxy)\n4. Check auto-save slots - usually separate from manual saves\n5. Community tools exist for many games to repair or edit saves";
   }
 
   if (lower.includes("steam") || lower.includes("epic") || lower.includes("gog")) {
     return "**Platform save locations:**\n\n• **Steam:** C:\\Program Files\\Steam\\userdata\\<id>\\<appid>\n• **Epic Games:** Usually %LOCALAPPDATA%\\<game> or Documents\n• **GOG:** Varies per game, check GOG Galaxy settings\n• **Xbox/Game Pass:** Usually in %LOCALAPPDATA%\\Packages\n\nGameVault's auto-detect scans all common locations.";
   }
 
-  return "I can help with:\n\n• **Save file locations** — \"Where are Elden Ring saves?\"\n• **Backup strategies** — protecting your progress\n• **Troubleshooting** — fixing corrupted or missing saves\n• **Game management** — organizing your library\n• **Platform specifics** — Steam, Epic, GOG save paths\n\nWhat would you like to know?";
+  return "I can help with:\n\n• **Save file locations** - \"Where are Elden Ring saves?\"\n• **Backup strategies** - protecting your progress\n• **Troubleshooting** - fixing corrupted or missing saves\n• **Game management** - organizing your library\n• **Platform specifics** - Steam, Epic, GOG save paths\n\nWhat would you like to know?";
 }

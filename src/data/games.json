@@ -49,7 +49,9 @@
       "save_paths": [
         "%APPDATA%\\DarkSoulsII"
       ],
-      "extensions": [".sl2"],
+      "extensions": [
+        ".sl2"
+      ],
       "notes": ""
     },
     {
@@ -62,7 +64,9 @@
       "save_paths": [
         "%APPDATA%\\DarkSoulsIII"
       ],
-      "extensions": [".sl2"],
+      "extensions": [
+        ".sl2"
+      ],
       "notes": ""
     },
     {
@@ -75,7 +79,9 @@
       "save_paths": [
         "%APPDATA%\\Sekiro"
       ],
-      "extensions": [".sl2"],
+      "extensions": [
+        ".sl2"
+      ],
       "notes": ""
     },
     {
@@ -140,7 +146,9 @@
       "save_paths": [
         "%APPDATA%\\TRX"
       ],
-      "extensions": [".dat"],
+      "extensions": [
+        ".dat"
+      ],
       "notes": ""
     },
     {
@@ -153,7 +161,9 @@
       "save_paths": [
         "%APPDATA%\\TRX2"
       ],
-      "extensions": [".dat"],
+      "extensions": [
+        ".dat"
+      ],
       "notes": ""
     },
     {
@@ -205,7 +215,9 @@
       "save_paths": [
         "%STEAM_USERDATA%\\35130\\remote"
       ],
-      "extensions": [".lcgolsave"],
+      "extensions": [
+        ".lcgolsave"
+      ],
       "notes": "Located in Steam userdata folder"
     },
     {
@@ -218,7 +230,9 @@
       "save_paths": [
         "%STEAM_USERDATA%\\289690\\remote"
       ],
-      "extensions": [".dat"],
+      "extensions": [
+        ".dat"
+      ],
       "notes": "Located in Steam userdata folder"
     },
     {
@@ -263,14 +277,16 @@
     {
       "id": "rv_there_yet",
       "name": "RV There Yet?",
-      "developer": "Two Star Games",
+      "developer": "Nuggets Entertainment",
       "steam_appid": "3949040",
-      "cover_url": "https://cdn.cloudflare.steamstatic.com/steam/apps/3949040/library_600x900_2x.jpg",
-      "header_url": "https://cdn.cloudflare.steamstatic.com/steam/apps/3949040/header.jpg",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/3949040/library_600x900.jpg",
+      "header_url": "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3949040/cae24b4ed7f4531be51f0d63f785b7d253f92dc3/header.jpg?t=1766020280",
       "save_paths": [
         "%LOCALAPPDATA%\\Ride\\Saved\\SaveGames"
       ],
-      "extensions": [".sav"],
+      "extensions": [
+        ".sav"
+      ],
       "notes": ""
     },
     {
@@ -309,7 +325,9 @@
       "save_paths": [
         "%USERPROFILE%\\AppData\\LocalLow\\Team Cherry\\Hollow Knight"
       ],
-      "extensions": [".dat"],
+      "extensions": [
+        ".dat"
+      ],
       "notes": ""
     },
     {
@@ -322,7 +340,9 @@
       "save_paths": [
         "%USERPROFILE%\\Saved Games\\CD Projekt Red\\Cyberpunk 2077"
       ],
-      "extensions": [".dat"],
+      "extensions": [
+        ".dat"
+      ],
       "notes": ""
     },
     {
@@ -335,7 +355,9 @@
       "save_paths": [
         "%USERPROFILE%\\Documents\\The Witcher 3\\gamesaves"
       ],
-      "extensions": [".sav"],
+      "extensions": [
+        ".sav"
+      ],
       "notes": ""
     },
     {
@@ -361,7 +383,10 @@
       "save_paths": [
         "%USERPROFILE%\\Documents\\My Games\\Skyrim Special Edition\\Saves"
       ],
-      "extensions": [".ess", ".skse"],
+      "extensions": [
+        ".ess",
+        ".skse"
+      ],
       "notes": ""
     },
     {
@@ -374,7 +399,10 @@
       "save_paths": [
         "%USERPROFILE%\\Documents\\My Games\\Skyrim\\Saves"
       ],
-      "extensions": [".ess", ".skse"],
+      "extensions": [
+        ".ess",
+        ".skse"
+      ],
       "notes": "Original Skyrim (2011)"
     },
     {
@@ -387,7 +415,9 @@
       "save_paths": [
         "%LOCALAPPDATA%\\Larian Studios\\Baldur's Gate 3\\PlayerProfiles\\Public\\Savegames\\Story"
       ],
-      "extensions": [".lsv"],
+      "extensions": [
+        ".lsv"
+      ],
       "notes": ""
     },
     {
@@ -400,7 +430,9 @@
       "save_paths": [
         "%USERPROFILE%\\Documents\\Saved Games\\Hades"
       ],
-      "extensions": [".sav"],
+      "extensions": [
+        ".sav"
+      ],
       "notes": ""
     },
     {
@@ -413,7 +445,9 @@
       "save_paths": [
         "%USERPROFILE%\\Documents\\Saved Games\\Hades II"
       ],
-      "extensions": [".sav"],
+      "extensions": [
+        ".sav"
+      ],
       "notes": ""
     },
     {
@@ -426,7 +460,10 @@
       "save_paths": [
         "%USERPROFILE%\\Documents\\My Games\\Terraria"
       ],
-      "extensions": [".wld", ".plr"],
+      "extensions": [
+        ".wld",
+        ".plr"
+      ],
       "notes": "Includes worlds and player files"
     },
     {
@@ -439,7 +476,10 @@
       "save_paths": [
         "%USERPROFILE%\\AppData\\LocalLow\\IronGate\\Valheim"
       ],
-      "extensions": [".fwl", ".db"],
+      "extensions": [
+        ".fwl",
+        ".db"
+      ],
       "notes": ""
     },
     {
@@ -530,7 +570,9 @@
       "save_paths": [
         "%LOCALAPPDATA%\\Celeste\\Saves"
       ],
-      "extensions": [".celeste"],
+      "extensions": [
+        ".celeste"
+      ],
       "notes": ""
     },
     {
@@ -610,6 +652,478 @@
       ],
       "extensions": [],
       "notes": ""
+    },
+    {
+      "id": "dispatch",
+      "name": "Dispatch",
+      "developer": "Unknown",
+      "steam_appid": "2592160",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/2592160/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/2592160/header.jpg",
+      "save_paths": [
+        "%LOCALAPPDATA%\\Dispatch\\Saved\\SaveGames"
+      ],
+      "extensions": [
+        ".sav"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "detroit_become_human",
+      "name": "Detroit: Become Human",
+      "developer": "Quantic Dream",
+      "steam_appid": "1222140",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1222140/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1222140/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\Saved Games\\Quantic Dream\\Detroit Become Human"
+      ],
+      "extensions": [
+        ".qdsav"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "the_quarry",
+      "name": "The Quarry",
+      "developer": "Supermassive Games",
+      "steam_appid": "1577120",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1577120/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1577120/header.jpg",
+      "save_paths": [
+        "%LOCALAPPDATA%\\TheQuarry\\Saved\\SaveGames"
+      ],
+      "extensions": [
+        ".sav"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "until_dawn",
+      "name": "Until Dawn",
+      "developer": "Supermassive Games",
+      "steam_appid": "2172010",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/2172010/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/2172010/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\Documents\\My Games\\Bates\\Saved\\SaveGames"
+      ],
+      "extensions": [
+        ".sav"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "plateup",
+      "name": "PlateUp!",
+      "developer": "It's Happening",
+      "steam_appid": "1599600",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1599600/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1599600/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Its Happening\\PlateUp"
+      ],
+      "extensions": [
+        ".plateupsave"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "overcooked",
+      "name": "Overcooked",
+      "developer": "Ghost Town Games",
+      "steam_appid": "448510",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/448510/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/448510/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Ghost Town Games\\Overcooked"
+      ],
+      "extensions": [
+        ".save"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "overcooked_2",
+      "name": "Overcooked! 2",
+      "developer": "Ghost Town Games",
+      "steam_appid": "728880",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/728880/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/728880/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Team17\\Overcooked2"
+      ],
+      "extensions": [
+        ".save"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "overcooked_all_you_can_eat",
+      "name": "Overcooked! All You Can Eat",
+      "developer": "Team17 / Ghost Town Games",
+      "steam_appid": "1243830",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1243830/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1243830/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Team17\\Overcooked All You Can Eat"
+      ],
+      "extensions": [
+        ".save"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "doom_plus_doom_ii",
+      "name": "DOOM + DOOM II",
+      "developer": "id Software / Nightdive Studios",
+      "steam_appid": "2280",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/2280/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/2280/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\Saved Games\\Nightdive Studios\\DOOM\\saves"
+      ],
+      "extensions": [
+        ".sav"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "doom_64",
+      "name": "DOOM 64",
+      "developer": "Nightdive Studios",
+      "steam_appid": "1148590",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1148590/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1148590/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\Saved Games\\Nightdive Studios\\DOOM 64\\saves"
+      ],
+      "extensions": [
+        ".sav",
+        ".sig"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "doom_2016",
+      "name": "DOOM (2016)",
+      "developer": "id Software",
+      "steam_appid": "379720",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/379720/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/379720/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\Saved Games\\id Software\\DOOM\\base\\savegame",
+        "%USERPROFILE%\\Saved Games\\id Software\\DOOM\\base\\savegame.user"
+      ],
+      "extensions": [
+        ".dat",
+        ".cfg",
+        ".bin",
+        ".verify"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "doom_3_bfg",
+      "name": "DOOM 3: BFG Edition",
+      "developer": "id Software",
+      "steam_appid": "208200",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/208200/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/208200/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\Saved Games\\id Software\\DOOM 3 BFG\\base"
+      ],
+      "extensions": [
+        ".save",
+        ".cfg"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "doom_vfr",
+      "name": "DOOM VFR",
+      "developer": "id Software",
+      "steam_appid": "650000",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/650000/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/650000/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\Saved Games\\id Software\\DOOM_VFR\\base"
+      ],
+      "extensions": [
+        ".cfg",
+        ".dat"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "it_takes_two",
+      "name": "It Takes Two",
+      "developer": "Hazelight Studios",
+      "steam_appid": "1426210",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1426210/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1426210/header.jpg",
+      "save_paths": [
+        "%LOCALAPPDATA%\\ItTakesTwo\\Saved\\SaveGames"
+      ],
+      "extensions": [
+        ".sav"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "a_way_out",
+      "name": "A Way Out",
+      "developer": "Hazelight Studios",
+      "steam_appid": "1222700",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1222700/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1222700/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\Documents\\My Games\\A Way Out\\Saves"
+      ],
+      "extensions": [
+        ".sav"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "split_fiction",
+      "name": "Split Fiction",
+      "developer": "Hazelight Studios",
+      "steam_appid": "2001120",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/2001120/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/2001120/header.jpg",
+      "save_paths": [
+        "%LOCALAPPDATA%\\SplitFiction"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "we_were_here_too",
+      "name": "We Were Here Too",
+      "developer": "Total Mayhem Games",
+      "steam_appid": "677160",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/677160/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/677160/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Total Mayhem Games\\We Were Here Too\\Config"
+      ],
+      "extensions": [
+        ".cfg"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "we_were_here_together",
+      "name": "We Were Here Together",
+      "developer": "Total Mayhem Games",
+      "steam_appid": "865360",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/865360/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/865360/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Total Mayhem Games\\We Were Here Together\\Config"
+      ],
+      "extensions": [
+        ".cfg"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "we_were_here_forever",
+      "name": "We Were Here Forever",
+      "developer": "Total Mayhem Games",
+      "steam_appid": "1341290",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1341290/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1341290/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Total Mayhem Games\\We Were Here Forever\\Config"
+      ],
+      "extensions": [
+        ".cfg"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "chivalry_2",
+      "name": "Chivalry 2",
+      "developer": "Torn Banner Studios",
+      "steam_appid": "1824220",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1824220/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1824220/header.jpg",
+      "save_paths": [
+        "%LOCALAPPDATA%\\Chivalry 2\\TBL\\Saved\\Cloud"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "lethal_company",
+      "name": "Lethal Company",
+      "developer": "Zeekerss",
+      "steam_appid": "1966720",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1966720/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1966720/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\ZeekerssRBLX\\Lethal Company"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "palworld",
+      "name": "Palworld",
+      "developer": "Pocketpair",
+      "steam_appid": "1623730",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1623730/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1623730/header.jpg",
+      "save_paths": [
+        "%LOCALAPPDATA%\\Pal\\Saved\\SaveGames"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "phasmophobia",
+      "name": "Phasmophobia",
+      "developer": "Kinetic Games",
+      "steam_appid": "739630",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/739630/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/739630/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Kinetic Games\\Phasmophobia"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "helldivers_2",
+      "name": "HELLDIVERS 2",
+      "developer": "Arrowhead Game Studios",
+      "steam_appid": "553850",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/553850/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/553850/header.jpg",
+      "save_paths": [],
+      "extensions": [],
+      "notes": "Server-side saves - no local backup needed"
+    },
+    {
+      "id": "vampire_survivors",
+      "name": "Vampire Survivors",
+      "developer": "poncle",
+      "steam_appid": "1794680",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1794680/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1794680/header.jpg",
+      "save_paths": [
+        "%APPDATA%\\Vampire_Survivors\\saves"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "slay_the_spire",
+      "name": "Slay the Spire",
+      "developer": "Mega Crit",
+      "steam_appid": "646570",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/646570/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/646570/header.jpg",
+      "save_paths": [
+        "%GAME_INSTALL%\\saves"
+      ],
+      "extensions": [],
+      "notes": "Saves in game install folder"
+    },
+    {
+      "id": "deep_rock_galactic",
+      "name": "Deep Rock Galactic",
+      "developer": "Ghost Ship Games",
+      "steam_appid": "548430",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/548430/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/548430/header.jpg",
+      "save_paths": [
+        "%GAME_INSTALL%\\FSD\\Saved\\SaveGames"
+      ],
+      "extensions": [],
+      "notes": "Saves in game install folder"
+    },
+    {
+      "id": "rimworld",
+      "name": "RimWorld",
+      "developer": "Ludeon Studios",
+      "steam_appid": "294100",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/294100/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/294100/header.jpg",
+      "save_paths": [
+        "%USERPROFILE%\\AppData\\LocalLow\\Ludeon Studios\\RimWorld by Ludeon Studios"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "factorio",
+      "name": "Factorio",
+      "developer": "Wube Software",
+      "steam_appid": "427520",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/427520/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/427520/header.jpg",
+      "save_paths": [
+        "%APPDATA%\\Factorio\\saves"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "brotato",
+      "name": "Brotato",
+      "developer": "Blobfish",
+      "steam_appid": "1942280",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/1942280/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/1942280/header.jpg",
+      "save_paths": [
+        "%APPDATA%\\Brotato"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "risk_of_rain_2",
+      "name": "Risk of Rain 2",
+      "developer": "Hopoo Games",
+      "steam_appid": "632360",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/632360/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/632360/header.jpg",
+      "save_paths": [
+        "%STEAM_USERDATA%\\632360\\remote"
+      ],
+      "extensions": [],
+      "notes": "Located in Steam userdata folder"
+    },
+    {
+      "id": "binding_of_isaac_rebirth",
+      "name": "The Binding of Isaac: Rebirth",
+      "developer": "Nicalis / Edmund McMillen",
+      "steam_appid": "250900",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/250900/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/250900/header.jpg",
+      "save_paths": [
+        "%STEAM_USERDATA%\\250900\\remote",
+        "%USERPROFILE%\\Documents\\My Games\\Binding of Isaac Repentance"
+      ],
+      "extensions": [],
+      "notes": ""
+    },
+    {
+      "id": "garrys_mod",
+      "name": "Garry's Mod",
+      "developer": "Facepunch Studios",
+      "steam_appid": "4000",
+      "cover_url": "https://cdn.akamai.steamstatic.com/steam/apps/4000/library_600x900.jpg",
+      "header_url": "https://cdn.akamai.steamstatic.com/steam/apps/4000/header.jpg",
+      "save_paths": [
+        "%GAME_INSTALL%\\garrysmod\\saves",
+        "%GAME_INSTALL%\\garrysmod\\dupes"
+      ],
+      "extensions": [],
+      "notes": "Saves in game install folder"
     }
   ]
 }

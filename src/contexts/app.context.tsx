@@ -174,6 +174,131 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Register global shortcuts for active key mappings and macros
   useKeyEngine(activeKeyMappings, activeMacros, settingsLoaded && !isOverlay);
 
+  // ── Register app-level global shortcuts (overlay, screenshot, backup) ──
+  useEffect(() => {
+    if (!settingsLoaded || isOverlay) return;
+
+    let cancelled = false;
+    const registeredShortcuts: string[] = [];
+
+    const registerAppShortcuts = async () => {
+      let plugin: any = null;
+      try {
+        plugin = await import("@tauri-apps/plugin-global-shortcut");
+      } catch {
+        console.warn("[AppShortcuts] global-shortcut plugin not available");
+        return;
+      }
+      if (cancelled || !plugin) return;
+
+      const { comboToTauriShortcut } = await import("@/lib/keycode-map");
+
+      const shortcuts: { combo: string; action: () => Promise<void> }[] = [
+        {
+          combo: settings.overlay_shortcut,
+          action: async () => { try { await invoke("toggle_overlay"); } catch (e) { console.error("[Shortcut] toggle_overlay:", e); } },
+        },
+        {
+          combo: settings.screenshot_shortcut,
+          action: async () => {
+            try {
+              if (!settings.screenshots_directory) { console.warn("[Shortcut] No screenshots directory set"); return; }
+              // Capture screen as base64, then save to disk
+              const base64 = await invoke<string>("capture_screen");
+              const result = await invoke<{
+                id: string;
+                file_path: string;
+                thumbnail_path: string;
+                width: number;
+                height: number;
+                file_size: number;
+              }>("save_screenshot_file", {
+                screenshotsDir: settings.screenshots_directory,
+                gameId: selectedGameId || "_general",
+                base64Data: base64,
+                filename: null,
+              });
+              // Save to database
+              const db = await import("@tauri-apps/plugin-sql");
+              const conn = await db.default.load("sqlite:gamevault.db");
+              await conn.execute(
+                `INSERT INTO screenshots (id, game_id, file_path, thumbnail_path, width, height, file_size, captured_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, datetime('now'))`,
+                [result.id, selectedGameId || "_general", result.file_path, result.thumbnail_path, result.width, result.height, result.file_size]
+              );
+              toast.success("Screenshot captured!");
+            } catch (e) { console.error("[Shortcut] screenshot:", e); }
+          },
+        },
+        {
+          combo: settings.quick_backup_shortcut,
+          action: async () => {
+            const currentGame = games.find((g) => g.id === selectedGameId) || null;
+            if (!currentGame || !settings.backup_directory || currentGame.save_paths.length === 0) return;
+            try {
+              const toastId = toast.loading("Quick backup...");
+              await invoke("create_backup", {
+                backupDir: settings.backup_directory,
+                gameId: currentGame.id,
+                gameName: currentGame.name,
+                savePath: currentGame.save_paths[0],
+                displayName: `Quick backup`,
+                collectionId: null,
+                checkDuplicates: true,
+              });
+              toast.success("Quick backup done!", { id: toastId });
+            } catch (e) { console.error("[Shortcut] backup:", e); }
+          },
+        },
+      ];
+
+      for (const { combo, action } of shortcuts) {
+        if (!combo || combo.trim().length === 0) continue;
+        const tauriCombo = comboToTauriShortcut(combo);
+        try {
+          if (await plugin.isRegistered(tauriCombo)) {
+            await plugin.unregister(tauriCombo);
+          }
+          await plugin.register(tauriCombo, async (event: any) => {
+            if (event.state === "Pressed") await action();
+          });
+          registeredShortcuts.push(tauriCombo);
+        } catch (err) {
+          console.warn(`[AppShortcuts] Failed to register ${tauriCombo}:`, err);
+        }
+      }
+    };
+
+    registerAppShortcuts();
+
+    return () => {
+      cancelled = true;
+      // Cleanup on unmount or re-registration
+      (async () => {
+        try {
+          const plugin = await import("@tauri-apps/plugin-global-shortcut");
+          for (const sc of registeredShortcuts) {
+            try {
+              if (await plugin.isRegistered(sc)) {
+                await plugin.unregister(sc);
+              }
+            } catch { /* ignore */ }
+          }
+        } catch { /* ignore */ }
+      })();
+    };
+  }, [
+    settingsLoaded,
+    isOverlay,
+    settings.overlay_shortcut,
+    settings.screenshot_shortcut,
+    settings.quick_backup_shortcut,
+    settings.backup_directory,
+    settings.screenshots_directory,
+    selectedGameId,
+    games,
+  ]);
+
   // ── Background game session detection (external launches) ─────────────────
   // Powers:
   // - Playtime tracking (per day + totals)
@@ -552,7 +677,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           method: "GET",
           headers: { "Cache-Control": "no-cache" },
         });
-        if (!resp.ok) return; // silent fail — not critical
+        if (!resp.ok) return; // silent fail - not critical
 
         const data = (await resp.json()) as { games?: GameEntry[] };
         if (!data?.games?.length) return;
@@ -586,7 +711,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             continue;
           }
 
-          // New game entry — insert it
+          // New game entry - insert it
           await conn.execute(
             `INSERT INTO games (id, name, developer, steam_appid, cover_url, header_url, save_paths, extensions, notes, is_custom, is_detected, added_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, 0, datetime('now'), datetime('now'))`,
@@ -635,7 +760,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           console.log(`[GameVault] Synced ${added} new game(s) from remote database`);
         }
       } catch (err) {
-        // Silent — this is a background enhancement, not critical
+        // Silent - this is a background enhancement, not critical
         console.debug("[GameVault] Remote game sync skipped:", err);
       }
     };
@@ -794,12 +919,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             continue;
           }
 
+          // Get or create an "Auto Backup" collection for this game
+          let autoCollId: string | null = null;
+          try {
+            const collRows = (await conn.select(
+              "SELECT id FROM backup_collections WHERE game_id = $1 AND name = 'Auto Backup'",
+              [game.id]
+            )) as Array<{ id: string }>;
+            if (collRows.length > 0) {
+              autoCollId = collRows[0].id;
+            } else {
+              autoCollId = crypto.randomUUID();
+              await conn.execute(
+                "INSERT INTO backup_collections (id, game_id, name, max_backups, color) VALUES ($1, $2, 'Auto Backup', $3, '#64748b')",
+                [autoCollId, game.id, settings.max_backups_per_game]
+              );
+            }
+          } catch {
+            // If collection creation fails, store as uncategorized
+          }
+
           await conn.execute(
-            `INSERT INTO backups (id, game_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, datetime('now'))`,
+            `INSERT INTO backups (id, game_id, collection_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, datetime('now'))`,
             [
               result.backup_id,
               game.id,
+              autoCollId,
               `Auto Backup ${new Date().toLocaleString()}`,
               result.file_path,
               result.file_size,
@@ -809,11 +955,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             ]
           );
 
-          // Only prune auto-created backups — manual/overlay backups are never auto-deleted
-          const autoRows = (await conn.select(
-            "SELECT id, file_path FROM backups WHERE game_id = $1 AND display_name LIKE '%Auto%' ORDER BY created_at DESC",
-            [game.id]
-          )) as Array<{ id: string; file_path: string }>;
+          // Prune old auto-backups in this collection
+          const pruneQuery = autoCollId
+            ? "SELECT id, file_path FROM backups WHERE game_id = $1 AND collection_id = $2 ORDER BY created_at DESC"
+            : "SELECT id, file_path FROM backups WHERE game_id = $1 AND display_name LIKE '%Auto%' ORDER BY created_at DESC";
+          const pruneParams = autoCollId ? [game.id, autoCollId] : [game.id];
+          const autoRows = (await conn.select(pruneQuery, pruneParams)) as Array<{ id: string; file_path: string }>;
           if (autoRows.length > settings.max_backups_per_game) {
             const overflow = autoRows.slice(settings.max_backups_per_game);
             for (const old of overflow) {
@@ -908,7 +1055,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           );
         }
       } catch {
-        // Silent — don't bother the user if the update check fails
+        // Silent - don't bother the user if the update check fails
       }
     };
 

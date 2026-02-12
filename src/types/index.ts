@@ -225,6 +225,9 @@ export interface GameNote {
   content: string;
   color: string;
   is_pinned: boolean;
+  // Tags
+  tags: string[];
+  is_archived: boolean;
   // Reminders
   reminder_enabled: boolean;
   remind_next_session: boolean;

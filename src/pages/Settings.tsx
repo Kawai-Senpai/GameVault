@@ -39,6 +39,10 @@ import {
   Search,
   Download,
   Layers,
+  Upload,
+  HardDrive,
+  FileArchive,
+  Check,
 } from "lucide-react";
 import type { AppSettings } from "@/types";
 import { Slider } from "@/components/ui/slider";
@@ -49,6 +53,11 @@ export default function Settings() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<{ imported: number; skipped: number; total: number } | null>(null);
+
+  // Data dump state
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [dumpResult, setDumpResult] = useState<{ type: "export" | "import"; data: Record<string, number>; filePath?: string; fileSize?: number } | null>(null);
 
   // Update state
   const [updateInfo, setUpdateInfo] = useState<{
@@ -245,7 +254,7 @@ export default function Settings() {
         )) as Array<{ id: string }>;
 
         if (gameExists.length === 0) {
-          // Game doesn't exist — skip this backup (we can't orphan it)
+          // Game doesn't exist - skip this backup (we can't orphan it)
           skipped += 1;
           continue;
         }
@@ -450,7 +459,7 @@ export default function Settings() {
                   </Button>
                 </div>
                 {settings.ai_provider === "openrouter" && settings.ai_openrouter_api_key && (
-                  <p className="text-[8px] text-success mt-0.5 flex items-center gap-1">● Active — using this key</p>
+                  <p className="text-[8px] text-success mt-0.5 flex items-center gap-1">● Active - using this key</p>
                 )}
               </div>
 
@@ -474,7 +483,7 @@ export default function Settings() {
                   </Button>
                 </div>
                 {settings.ai_provider === "openai" && settings.ai_openai_api_key && (
-                  <p className="text-[8px] text-success mt-0.5 flex items-center gap-1">● Active — using this key</p>
+                  <p className="text-[8px] text-success mt-0.5 flex items-center gap-1">● Active - using this key</p>
                 )}
               </div>
 
@@ -560,7 +569,7 @@ export default function Settings() {
                     )}
                     {scanResult && !isScanning && (
                       <p className="text-[9px] text-muted-foreground">
-                        Found {scanResult.total} backup{scanResult.total !== 1 ? "s" : ""} — {scanResult.imported} imported, {scanResult.skipped} skipped
+                        Found {scanResult.total} backup{scanResult.total !== 1 ? "s" : ""} - {scanResult.imported} imported, {scanResult.skipped} skipped
                       </p>
                     )}
                   </div>
@@ -616,7 +625,7 @@ export default function Settings() {
                   className="mt-1 w-32"
                 />
                 <p className="text-[9px] text-muted-foreground mt-0.5">
-                  Only auto-backups are pruned — your manual backups are never deleted
+                  Only auto-backups are pruned - your manual backups are never deleted
                 </p>
               </div>
 
@@ -744,6 +753,132 @@ export default function Settings() {
                   onCheckedChange={(v) => handleUpdate("minimize_to_tray", v)}
                 />
               </div>
+            </CardContent>
+          </Card>
+
+          {/* ── Data Export / Import ─────────────────────────── */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <HardDrive className="size-3.5" /> Data Export & Import
+              </CardTitle>
+              <CardDescription>
+                Transfer your GameVault data between computers. API keys are never exported for security.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 h-9 text-[10px] gap-1.5"
+                  disabled={isExporting}
+                  onClick={async () => {
+                    setIsExporting(true);
+                    setDumpResult(null);
+                    try {
+                      const { save } = await import("@tauri-apps/plugin-dialog");
+                      const filePath = await save({
+                        title: "Export GameVault Data",
+                        defaultPath: `gamevault_backup_${new Date().toISOString().slice(0, 10).replace(/-/g, "")}.gvdump`,
+                        filters: [{ name: "GameVault Dump", extensions: ["gvdump"] }],
+                      });
+                      if (!filePath) {
+                        setIsExporting(false);
+                        return;
+                      }
+                      const result = await invoke<Record<string, number>>("export_vault_data", { filePath });
+                      setDumpResult({
+                        type: "export",
+                        data: result,
+                        filePath: result.file_path as unknown as string,
+                        fileSize: result.file_size as unknown as number,
+                      });
+                      toast.success("Data exported successfully!");
+                    } catch (err) {
+                      const msg = String(err);
+                      if (!msg.includes("cancelled")) toast.error(`Export failed: ${err}`);
+                    } finally {
+                      setIsExporting(false);
+                    }
+                  }}
+                >
+                  {isExporting ? (
+                    <><FileArchive className="size-3 animate-pulse" /> Exporting...</>
+                  ) : (
+                    <><Upload className="size-3" /> Export Data</>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 h-9 text-[10px] gap-1.5"
+                  disabled={isImporting}
+                  onClick={async () => {
+                    if (!confirm("Importing will merge data into your current database. Existing entries with the same ID will be overwritten. Continue?")) return;
+                    setIsImporting(true);
+                    setDumpResult(null);
+                    try {
+                      const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+                      const filePath = await openDialog({
+                        title: "Import GameVault Data",
+                        filters: [{ name: "GameVault Dump", extensions: ["gvdump"] }],
+                        multiple: false,
+                        directory: false,
+                      });
+                      if (!filePath) {
+                        setIsImporting(false);
+                        return;
+                      }
+                      const result = await invoke<Record<string, number>>("import_vault_data", { filePath });
+                      setDumpResult({ type: "import", data: result });
+                      toast.success("Data imported successfully! Restart the app to see all changes.");
+                    } catch (err) {
+                      const msg = String(err);
+                      if (!msg.includes("cancelled")) toast.error(`Import failed: ${err}`);
+                    } finally {
+                      setIsImporting(false);
+                    }
+                  }}
+                >
+                  {isImporting ? (
+                    <><FileArchive className="size-3 animate-pulse" /> Importing...</>
+                  ) : (
+                    <><Download className="size-3" /> Import Data</>
+                  )}
+                </Button>
+              </div>
+
+              {dumpResult && (
+                <div className="rounded-lg bg-muted/50 border border-border/50 p-2.5 space-y-1.5 animate-slide-up">
+                  <div className="flex items-center gap-1.5">
+                    <Check className="size-3 text-emerald-500" />
+                    <span className="text-[10px] font-medium">
+                      {dumpResult.type === "export" ? "Export" : "Import"} Complete
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 text-[9px] text-muted-foreground">
+                    {Object.entries(dumpResult.data)
+                      .filter(([k]) => !k.startsWith("file_"))
+                      .map(([key, val]) => (
+                        <div key={key} className="flex justify-between">
+                          <span className="capitalize">{key.replace(/_/g, " ")}</span>
+                          <span className="font-mono tabular-nums">{val}</span>
+                        </div>
+                      ))}
+                  </div>
+                  {dumpResult.fileSize != null && (
+                    <p className="text-[8px] text-muted-foreground">
+                      File size: {(dumpResult.fileSize / 1024).toFixed(1)} KB
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <p className="text-[8px] text-muted-foreground leading-relaxed">
+                <strong>Note:</strong> API keys are never included in exports. Backup zip files are not included - 
+                only their metadata. Copy your backup directory separately when migrating.
+              </p>
             </CardContent>
           </Card>
 

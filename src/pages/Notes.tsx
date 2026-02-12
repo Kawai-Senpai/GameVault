@@ -36,6 +36,10 @@ import {
   Clock,
   Palette,
   FolderOpen,
+  Tag,
+  Archive,
+  ArchiveRestore,
+  X,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { GameNote } from "@/types";
@@ -64,6 +68,8 @@ export default function Notes() {
   const [editingNote, setEditingNote] = useState<GameNote | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [selectedTag, setSelectedTag] = useState<string>("");
 
   // New / edit note form state
   const [noteTitle, setNoteTitle] = useState("");
@@ -72,6 +78,8 @@ export default function Notes() {
   const [noteGameId, setNoteGameId] = useState<string>("");
   const [remindNextSession, setRemindNextSession] = useState(false);
   const [recurringDays, setRecurringDays] = useState<number | null>(null);
+  const [noteTags, setNoteTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Load notes
@@ -103,6 +111,15 @@ export default function Notes() {
           last_reminded_at: ((r as any).last_reminded_at as string) || null,
           last_shown_at: ((r as any).last_shown_at as string) || null,
           is_dismissed: Boolean((r as any).is_dismissed),
+          tags: (() => {
+            try {
+              const raw = (r as any).tags;
+              if (Array.isArray(raw)) return raw;
+              if (typeof raw === "string") return JSON.parse(raw);
+              return [];
+            } catch { return []; }
+          })(),
+          is_archived: Boolean((r as any).is_archived),
           created_at: r.created_at as string,
           updated_at: r.updated_at as string,
         }))
@@ -121,19 +138,25 @@ export default function Notes() {
   // Filtered notes
   const filteredNotes = useMemo(() => {
     let result = notes;
+    // Archive filter
+    result = result.filter((n) => Boolean(n.is_archived) === showArchived);
     if (selectedGameId !== "all") {
       result = result.filter((n) => n.game_id === selectedGameId);
+    }
+    if (selectedTag) {
+      result = result.filter((n) => n.tags?.includes(selectedTag));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
         (n) =>
           n.title.toLowerCase().includes(q) ||
-          n.content.toLowerCase().includes(q)
+          n.content.toLowerCase().includes(q) ||
+          n.tags?.some((t) => t.toLowerCase().includes(q))
       );
     }
     return result;
-  }, [notes, selectedGameId, searchQuery]);
+  }, [notes, selectedGameId, searchQuery, showArchived, selectedTag]);
 
   // Open create dialog
   const openCreateDialog = () => {
@@ -144,6 +167,8 @@ export default function Notes() {
     setNoteGameId(selectedGameId !== "all" ? selectedGameId : (games[0]?.id || ""));
     setRemindNextSession(false);
     setRecurringDays(null);
+    setNoteTags([]);
+    setTagInput("");
     setIsDialogOpen(true);
   };
 
@@ -156,6 +181,8 @@ export default function Notes() {
     setNoteGameId(note.game_id);
     setRemindNextSession(Boolean(note.remind_next_session));
     setRecurringDays(note.recurring_days ?? null);
+    setNoteTags(note.tags || []);
+    setTagInput("");
     setIsDialogOpen(true);
   };
 
@@ -191,6 +218,7 @@ export default function Notes() {
       const reminderEnabled = willEnableReminder ? 1 : 0;
       const nextSession = remindNextSession ? 1 : 0;
       const recurring = recurringDays !== null ? recurringDays : null;
+      const tagsJson = JSON.stringify(noteTags);
 
       if (editingNote) {
         // Update
@@ -203,6 +231,7 @@ export default function Notes() {
             reminder_enabled = $5,
             remind_next_session = $6,
             recurring_days = $7,
+            tags = $9,
             is_dismissed = CASE WHEN $5 = 0 THEN 0 ELSE is_dismissed END,
             updated_at = datetime('now')
            WHERE id = $8`,
@@ -215,6 +244,7 @@ export default function Notes() {
             nextSession,
             recurring,
             editingNote.id,
+            tagsJson,
           ]
         );
         toast.success("Note updated");
@@ -222,9 +252,9 @@ export default function Notes() {
         // Create
         const id = crypto.randomUUID();
         await conn.execute(
-          `INSERT INTO game_notes (id, game_id, title, content, color, reminder_enabled, remind_next_session, recurring_days)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [id, noteGameId, noteTitle.trim(), noteContent, noteColor, reminderEnabled, nextSession, recurring]
+          `INSERT INTO game_notes (id, game_id, title, content, color, reminder_enabled, remind_next_session, recurring_days, tags)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [id, noteGameId, noteTitle.trim(), noteContent, noteColor, reminderEnabled, nextSession, recurring, tagsJson]
         );
         toast.success("Note created");
       }
@@ -254,6 +284,22 @@ export default function Notes() {
     }
   };
 
+  // Toggle archive
+  const handleToggleArchive = async (note: GameNote) => {
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      await conn.execute(
+        "UPDATE game_notes SET is_archived = $1, updated_at = datetime('now') WHERE id = $2",
+        [note.is_archived ? 0 : 1, note.id]
+      );
+      await loadNotes();
+      toast.success(note.is_archived ? "Note restored" : "Note archived");
+    } catch (err) {
+      toast.error(`Failed to update: ${err}`);
+    }
+  };
+
   // Delete note
   const handleDelete = async (note: GameNote) => {
     try {
@@ -278,6 +324,17 @@ export default function Notes() {
     }
     return counts;
   }, [notes]);
+
+  // All unique tags from all notes
+  const allTags = useMemo(() => {
+    const tags = new Set<string>();
+    for (const n of notes) {
+      if (n.tags) n.tags.forEach((t) => tags.add(t));
+    }
+    return Array.from(tags).sort();
+  }, [notes]);
+
+  const archivedCount = useMemo(() => notes.filter((n) => n.is_archived).length, [notes]);
 
   return (
     <div className="flex flex-col h-full">
@@ -322,6 +379,40 @@ export default function Notes() {
             className="h-7 pl-7 text-[10px]"
           />
         </div>
+
+        {/* Tag filter */}
+        {allTags.length > 0 && (
+          <Select value={selectedTag || "__all__"} onValueChange={(v) => setSelectedTag(v === "__all__" ? "" : v)}>
+            <SelectTrigger className="h-7 w-32 text-[10px]">
+              <Tag className="size-3 mr-1 shrink-0" />
+              <SelectValue placeholder="All tags" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All Tags</SelectItem>
+              {allTags.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {/* Archive toggle */}
+        <Button
+          variant={showArchived ? "secondary" : "ghost"}
+          size="sm"
+          className="h-7 text-[9px] gap-1 shrink-0"
+          onClick={() => setShowArchived(!showArchived)}
+        >
+          <Archive className="size-3" />
+          {showArchived ? "Viewing Archived" : "Archive"}
+          {archivedCount > 0 && (
+            <Badge variant="outline" className="text-[7px] px-1 py-0 ml-0.5">
+              {archivedCount}
+            </Badge>
+          )}
+        </Button>
 
         <Badge variant="secondary" className="text-[8px] shrink-0">
           {filteredNotes.length} note{filteredNotes.length !== 1 ? "s" : ""}
@@ -374,7 +465,9 @@ export default function Notes() {
                   gameName={getGameName(note.game_id)}
                   onEdit={() => openEditDialog(note)}
                   onTogglePin={() => handleTogglePin(note)}
+                  onToggleArchive={() => handleToggleArchive(note)}
                   onDelete={() => handleDelete(note)}
+                  onTagClick={(t) => setSelectedTag(t)}
                 />
               ))}
             </div>
@@ -455,6 +548,49 @@ export default function Notes() {
                   />
                 ))}
               </div>
+            </div>
+
+            {/* Tags */}
+            <div>
+              <Label className="text-[10px] flex items-center gap-1">
+                <Tag className="size-3" /> Tags
+              </Label>
+              <p className="text-[8px] text-muted-foreground mb-1">
+                Add tags to organize and find notes quickly (max 10)
+              </p>
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {noteTags.map((tag) => (
+                  <Badge key={tag} variant="secondary" className="text-[8px] px-1.5 py-0 gap-0.5">
+                    {tag}
+                    <button
+                      className="ml-0.5 hover:text-destructive transition-colors"
+                      onClick={() =>
+                        setNoteTags((prev) => prev.filter((t) => t !== tag))
+                      }
+                    >
+                      <X className="size-2" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+              {noteTags.length < 10 && (
+                <Input
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.key === "Enter" || e.key === ",") && tagInput.trim()) {
+                      e.preventDefault();
+                      const tag = tagInput.trim().toLowerCase().replace(/,/g, "");
+                      if (tag && !noteTags.includes(tag)) {
+                        setNoteTags((prev) => [...prev, tag]);
+                      }
+                      setTagInput("");
+                    }
+                  }}
+                  placeholder="Type and press Enter to add..."
+                  className="h-7 text-[10px]"
+                />
+              )}
             </div>
 
             {/* Reminders */}
@@ -550,13 +686,18 @@ interface NoteCardProps {
   gameName: string;
   onEdit: () => void;
   onTogglePin: () => void;
+  onToggleArchive: () => void;
   onDelete: () => void;
+  onTagClick: (tag: string) => void;
 }
 
-function NoteCard({ note, gameName, onEdit, onTogglePin, onDelete }: NoteCardProps) {
+function NoteCard({ note, gameName, onEdit, onTogglePin, onToggleArchive, onDelete, onTagClick }: NoteCardProps) {
   return (
     <Card
-      className="group overflow-hidden hover:border-foreground/20 transition-all cursor-pointer"
+      className={cn(
+        "group overflow-hidden hover:border-foreground/20 transition-all cursor-pointer",
+        note.is_archived && "opacity-60"
+      )}
       onClick={onEdit}
     >
       {/* Color strip */}
@@ -568,9 +709,10 @@ function NoteCard({ note, gameName, onEdit, onTogglePin, onDelete }: NoteCardPro
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               {note.is_pinned && <Pin className="size-2.5 text-gaming shrink-0" />}
+              {note.is_archived && <Archive className="size-2.5 text-muted-foreground shrink-0" />}
               <h3 className="text-[11px] font-semibold truncate">{note.title}</h3>
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               <Badge variant="outline" className="text-[7px] px-1 py-0 gap-0.5">
                 <Gamepad2 className="size-2" /> {gameName}
               </Badge>
@@ -592,6 +734,9 @@ function NoteCard({ note, gameName, onEdit, onTogglePin, onDelete }: NoteCardPro
             <Button variant="ghost" size="icon-sm" className="size-5" onClick={onTogglePin} title={note.is_pinned ? "Unpin" : "Pin"}>
               {note.is_pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
             </Button>
+            <Button variant="ghost" size="icon-sm" className="size-5" onClick={onToggleArchive} title={note.is_archived ? "Unarchive" : "Archive"}>
+              {note.is_archived ? <ArchiveRestore className="size-2.5" /> : <Archive className="size-2.5" />}
+            </Button>
             <Button variant="ghost" size="icon-sm" className="size-5" onClick={onEdit} title="Edit">
               <Pencil className="size-2.5" />
             </Button>
@@ -600,6 +745,28 @@ function NoteCard({ note, gameName, onEdit, onTogglePin, onDelete }: NoteCardPro
             </Button>
           </div>
         </div>
+
+        {/* Tags */}
+        {note.tags && note.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
+            {note.tags.slice(0, 5).map((tag) => (
+              <Badge
+                key={tag}
+                variant="secondary"
+                className="text-[7px] px-1 py-0 cursor-pointer hover:bg-accent"
+                onClick={() => onTagClick(tag)}
+              >
+                <Tag className="size-1.5 mr-0.5" />
+                {tag}
+              </Badge>
+            ))}
+            {note.tags.length > 5 && (
+              <Badge variant="secondary" className="text-[7px] px-1 py-0">
+                +{note.tags.length - 5}
+              </Badge>
+            )}
+          </div>
+        )}
 
         {/* Content preview */}
         {note.content && (

@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /* ════════════════════════════════════════════════════════════
-   Arcade overlay — mini-games: Tic Tac Toe, Snake, Flappy Bird
+   Arcade overlay - mini-games: Tic Tac Toe, Snake, Flappy Bird
    ════════════════════════════════════════════════════════════ */
 
 type ArcadeGame = "ttt" | "snake" | "flappy";
@@ -160,7 +160,7 @@ function TicTacToeGame() {
 }
 
 /* ════════════════════════════════════════════════════════════
-   Snake Game — Canvas-based for smooth rendering
+   Snake Game - Canvas-based for smooth rendering
    ════════════════════════════════════════════════════════════ */
 
 type Dir = "UP" | "DOWN" | "LEFT" | "RIGHT";
@@ -228,7 +228,7 @@ function SnakeGame() {
       }
     }
 
-    // Food — draw with glow ring for visibility
+    // Food - draw with glow ring for visibility
     ctx.save();
     const fx = s.food.x * CELL_PX + CELL_PX / 2;
     const fy = s.food.y * CELL_PX + CELL_PX / 2;

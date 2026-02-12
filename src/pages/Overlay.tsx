@@ -70,6 +70,7 @@ export default function Overlay() {
   const [selectedWindowKey, setSelectedWindowKey] = useState("");
   const [lastBackup, setLastBackup] = useState<Backup | null>(null);
   const [quickInput, setQuickInput] = useState("");
+  const [pendingAiMessage, setPendingAiMessage] = useState<string | null>(null);
   const [statusText, setStatusText] = useState("");
   const [restoreConfirm, setRestoreConfirm] = useState(false);
   const [screenshotBusy, setScreenshotBusy] = useState(false);
@@ -81,7 +82,7 @@ export default function Overlay() {
   const [dueReminders, setDueReminders] = useState<GameNote[]>([]);
   const [reminderHidden, setReminderHidden] = useState(false);
 
-  // Live session timer — shows how long current game has been running
+  // Live session timer - shows how long current game has been running
   const [sessionStartMs, setSessionStartMs] = useState<number | null>(null);
   const [sessionElapsed, setSessionElapsed] = useState(0);
   const prevMatchedGameId = useRef<string | null>(null);
@@ -106,7 +107,7 @@ export default function Overlay() {
   }, []);
 
   // Poll overlay_opacity from DB so changes made in Settings (separate window) are reflected live.
-  // The main window and overlay are separate React trees — they don't share React state.
+  // The main window and overlay are separate React trees - they don't share React state.
   const [liveOpacity, setLiveOpacity] = useState(settings.overlay_opacity);
   useEffect(() => {
     let cancelled = false;
@@ -216,6 +217,15 @@ export default function Overlay() {
           last_reminded_at: ((r as any).last_reminded_at as string) || null,
           last_shown_at: ((r as any).last_shown_at as string) || null,
           is_dismissed: Boolean((r as any).is_dismissed),
+          tags: (() => {
+            try {
+              const raw = (r as any).tags;
+              if (Array.isArray(raw)) return raw;
+              if (typeof raw === "string") return JSON.parse(raw);
+              return [];
+            } catch { return []; }
+          })(),
+          is_archived: Boolean((r as any).is_archived),
           created_at: r.created_at as string,
           updated_at: r.updated_at as string,
         }));
@@ -353,7 +363,7 @@ export default function Overlay() {
   };
 
   const openMainApp = () => {
-    invoke("show_overlay").catch(() => {}); // This is actually show main — let me use the right command
+    invoke("show_overlay").catch(() => {}); // This is actually show main - let me use the right command
     // We need to show the main window from overlay
     (async () => {
       try {
@@ -764,7 +774,7 @@ export default function Overlay() {
         )}
         style={{ maxWidth: 700, WebkitAppRegion: "drag", background: `rgba(0,0,0,${(liveOpacity || 92) / 100})` } as React.CSSProperties}
       >
-        {/* Logo + Game — click opens main app */}
+        {/* Logo + Game - click opens main app */}
         <img
           src="/icon-192.png"
           alt=""
@@ -824,7 +834,7 @@ export default function Overlay() {
 
         <div className="h-6 w-px bg-white/10 shrink-0" />
 
-        {/* Tab buttons — click toggles panel */}
+        {/* Tab buttons - click toggles panel */}
         <div
           className="flex items-center gap-0.5 shrink-0"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
@@ -859,8 +869,9 @@ export default function Overlay() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && quickInput.trim()) {
                 e.preventDefault();
-                handleTabClick("ai");
+                setPendingAiMessage(quickInput.trim());
                 setQuickInput("");
+                handleTabClick("ai");
               }
             }}
             placeholder="Ask AI..."
@@ -872,8 +883,9 @@ export default function Overlay() {
             className="size-6 shrink-0 text-white/40 hover:text-white"
             onClick={() => {
               if (quickInput.trim()) {
-                handleTabClick("ai");
+                setPendingAiMessage(quickInput.trim());
                 setQuickInput("");
+                handleTabClick("ai");
               }
             }}
             disabled={!quickInput.trim()}
@@ -954,6 +966,8 @@ export default function Overlay() {
                 settings={settings}
                 gameName={selectedGame?.name || matchedGame?.name}
                 exeName={selectedWindow?.process_name}
+                initialMessage={pendingAiMessage || undefined}
+                onMessageConsumed={() => setPendingAiMessage(null)}
               />
             </div>
           )}
@@ -1182,7 +1196,7 @@ function OpsPanel({
         {selectedGame && (
           <div className="text-[8px] text-white/50 space-y-0.5 mt-1">
             <p className="font-medium text-white/70">{selectedGame.name}</p>
-            <p className="truncate">Developer: {selectedGame.developer || "—"}</p>
+            <p className="truncate">Developer: {selectedGame.developer || "-"}</p>
             <p className="truncate">Save: {selectedGame.save_paths[0] || "Not configured"}</p>
             <p>EXE: {selectedGame.exe_path ? "Set" : "Not set"}</p>
             {lastBackup && (

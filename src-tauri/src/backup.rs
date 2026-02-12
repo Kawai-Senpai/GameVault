@@ -105,12 +105,12 @@ pub async fn create_backup(
     // Compute content hash for deduplication
     let content_hash = compute_directory_hash(&save_dir).map_err(|e| e.to_string())?;
 
-    // Check for duplicates if requested
+    // Check for duplicates if requested (collection-specific)
     if check_duplicates {
         let game_backup_dir =
             PathBuf::from(&backup_dir).join(format!("{}_{}", sanitize_name(&game_name), &game_id));
         if game_backup_dir.exists() {
-            // Check existing backups for matching hash
+            // Check existing backups for matching hash within the SAME collection
             if let Ok(entries) = fs::read_dir(&game_backup_dir) {
                 for entry in entries.flatten() {
                     if entry
@@ -120,7 +120,9 @@ pub async fn create_backup(
                         .unwrap_or(false)
                     {
                         if let Ok(info) = read_backup_metadata(&entry.path()) {
-                            if info.content_hash == content_hash {
+                            if info.content_hash == content_hash
+                                && info.collection_id == collection_id
+                            {
                                 return Ok(BackupResult {
                                     success: true,
                                     backup_id: info.id,
@@ -130,7 +132,7 @@ pub async fn create_backup(
                                     content_hash,
                                     skipped_duplicate: true,
                                     message:
-                                        "Backup skipped — saves haven't changed since last backup"
+                                        "Backup skipped - saves haven't changed since last backup"
                                             .to_string(),
                                 });
                             }
@@ -212,7 +214,7 @@ pub async fn create_backup(
         content_hash,
         skipped_duplicate: false,
         message: format!(
-            "Backup created successfully — {} files, {:.1} MB compressed",
+            "Backup created successfully - {} files, {:.1} MB compressed",
             file_count,
             compressed_size as f64 / 1_048_576.0
         ),
@@ -512,6 +514,143 @@ pub async fn scan_backup_directory(backup_dir: String) -> Result<Vec<ScannedBack
     discovered.sort_by(|a, b| b.backup_time.cmp(&a.backup_time));
 
     Ok(discovered)
+}
+
+/// Export (copy) a backup zip to a user-chosen destination folder for sharing
+#[tauri::command]
+pub async fn export_backup(zip_path: String, dest_folder: String) -> Result<String, String> {
+    let src = PathBuf::from(&zip_path);
+    if !src.exists() {
+        return Err(format!("Backup file not found: {}", zip_path));
+    }
+
+    let file_name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "backup.zip".to_string());
+
+    let dest = PathBuf::from(&dest_folder).join(&file_name);
+
+    // If destination already exists, add a numeric suffix
+    let final_dest = if dest.exists() {
+        let stem = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut i = 1u32;
+        loop {
+            let candidate = PathBuf::from(&dest_folder).join(format!("{}_{}.zip", stem, i));
+            if !candidate.exists() {
+                break candidate;
+            }
+            i += 1;
+            if i > 999 {
+                return Err("Too many copies in destination folder".to_string());
+            }
+        }
+    } else {
+        dest
+    };
+
+    fs::copy(&src, &final_dest).map_err(|e| format!("Failed to copy backup: {}", e))?;
+
+    Ok(final_dest.to_string_lossy().to_string())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImportedBackupResult {
+    pub backup_id: String,
+    pub file_path: String,
+    pub display_name: String,
+    pub file_size: u64,
+    pub compressed_size: u64,
+    pub content_hash: String,
+    pub source_path: String,
+}
+
+/// Import (copy) a backup zip from an external location into the game's backup directory.
+/// Returns metadata so the frontend can insert it into the DB.
+#[tauri::command]
+pub async fn import_external_backup(
+    source_zip: String,
+    backup_dir: String,
+    game_id: String,
+    game_name: String,
+) -> Result<ImportedBackupResult, String> {
+    let src = PathBuf::from(&source_zip);
+    if !src.exists() {
+        return Err(format!("Source file not found: {}", source_zip));
+    }
+
+    // Validate it's a valid GameVault backup by reading metadata
+    let meta = read_backup_metadata(&src).ok();
+
+    // Build the game's backup subfolder
+    let game_dir_name = format!("{}_{}", sanitize_name(&game_name), &game_id);
+    let game_backup_dir = PathBuf::from(&backup_dir).join(&game_dir_name);
+    fs::create_dir_all(&game_backup_dir).map_err(|e| e.to_string())?;
+
+    let file_name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "imported_backup.zip".to_string());
+
+    let dest = game_backup_dir.join(&file_name);
+
+    // If destination already exists, add a numeric suffix
+    let final_dest = if dest.exists() {
+        let stem = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut i = 1u32;
+        loop {
+            let candidate = game_backup_dir.join(format!("{}_{}.zip", stem, i));
+            if !candidate.exists() {
+                break candidate;
+            }
+            i += 1;
+            if i > 999 {
+                return Err("Too many backups with this name".to_string());
+            }
+        }
+    } else {
+        dest
+    };
+
+    fs::copy(&src, &final_dest).map_err(|e| format!("Failed to copy backup: {}", e))?;
+
+    let compressed_size = fs::metadata(&final_dest).map(|m| m.len()).unwrap_or(0);
+
+    // If we got valid metadata from the zip, use it. Otherwise generate new data.
+    let (backup_id, display_name, content_hash, file_size, source_path) =
+        if let Some(info) = meta {
+            (
+                info.id,
+                info.display_name,
+                info.content_hash,
+                info.total_size,
+                info.source_path,
+            )
+        } else {
+            (
+                Uuid::new_v4().to_string(),
+                format!("Imported: {}", file_name),
+                String::new(),
+                compressed_size,
+                String::new(),
+            )
+        };
+
+    Ok(ImportedBackupResult {
+        backup_id,
+        file_path: final_dest.to_string_lossy().to_string(),
+        display_name,
+        file_size,
+        compressed_size,
+        content_hash,
+        source_path,
+    })
 }
 
 /// Expand Windows environment variables in a path

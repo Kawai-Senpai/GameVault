@@ -1,4 +1,5 @@
 mod backup;
+mod datadump;
 mod games;
 mod keymapper;
 mod perf;
@@ -281,6 +282,40 @@ pub fn run() {
                             "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        // Migration 8: Notes tags + archive
+                        tauri_plugin_sql::Migration {
+                            version: 8,
+                            description: "Add tags and archived flag to game_notes",
+                            sql: r#"
+                                ALTER TABLE game_notes ADD COLUMN tags TEXT DEFAULT '[]';
+                                ALTER TABLE game_notes ADD COLUMN is_archived INTEGER DEFAULT 0;
+                            "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
+                        // Migration 9: Drop FK constraint on screenshots.game_id (allows _general etc.)
+                        tauri_plugin_sql::Migration {
+                            version: 9,
+                            description: "Remove FK constraint on screenshots game_id",
+                            sql: r#"
+                                CREATE TABLE IF NOT EXISTS screenshots_new (
+                                    id TEXT PRIMARY KEY,
+                                    game_id TEXT NOT NULL,
+                                    file_path TEXT NOT NULL,
+                                    thumbnail_path TEXT,
+                                    title TEXT DEFAULT '',
+                                    description TEXT DEFAULT '',
+                                    tags TEXT NOT NULL DEFAULT '[]',
+                                    width INTEGER DEFAULT 0,
+                                    height INTEGER DEFAULT 0,
+                                    file_size INTEGER DEFAULT 0,
+                                    captured_at TEXT NOT NULL DEFAULT (datetime('now'))
+                                );
+                                INSERT OR IGNORE INTO screenshots_new SELECT * FROM screenshots;
+                                DROP TABLE screenshots;
+                                ALTER TABLE screenshots_new RENAME TO screenshots;
+                            "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -318,6 +353,8 @@ pub fn run() {
             backup::open_backup_directory,
             backup::open_save_directory,
             backup::scan_backup_directory,
+            backup::export_backup,
+            backup::import_external_backup,
             // Game commands
             games::detect_installed_games,
             games::expand_env_path,
@@ -352,6 +389,9 @@ pub fn run() {
             // Startup behavior
             set_launch_on_startup,
             is_launch_on_startup_enabled,
+            // Data dump
+            datadump::export_vault_data,
+            datadump::import_vault_data,
             // General
             get_version,
             check_for_updates,

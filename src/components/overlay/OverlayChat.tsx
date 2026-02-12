@@ -20,9 +20,11 @@ interface Props {
   settings: AppSettings;
   gameName?: string;
   exeName?: string;
+  initialMessage?: string;
+  onMessageConsumed?: () => void;
 }
 
-export default function OverlayChat({ settings, gameName, exeName }: Props) {
+export default function OverlayChat({ settings, gameName, exeName, initialMessage, onMessageConsumed }: Props) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -32,9 +34,58 @@ export default function OverlayChat({ settings, gameName, exeName }: Props) {
   const chatRef = useRef<HTMLDivElement>(null);
   const isOpenRouter = settings.ai_provider === "openrouter";
 
+  // Periodically reload AI settings from DB (overlay is a separate window)
+  const [liveApiKey, setLiveApiKey] = useState(settings.ai_api_key);
+  const [liveProvider, setLiveProvider] = useState(settings.ai_provider);
+  const [liveModel, setLiveModel] = useState(settings.ai_model);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const db = await import("@tauri-apps/plugin-sql");
+        const conn = await db.default.load("sqlite:gamevault.db");
+        const rows = (await conn.select(
+          "SELECT key, value FROM settings WHERE key IN ('ai_provider', 'ai_openrouter_api_key', 'ai_openai_api_key', 'ai_model')"
+        )) as { key: string; value: string }[];
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        rows.forEach((r) => { map[r.key] = r.value; });
+        const provider = map.ai_provider || "openrouter";
+        const key = provider === "openai" ? map.ai_openai_api_key : map.ai_openrouter_api_key;
+        setLiveProvider(provider);
+        setLiveApiKey(key || "");
+        setLiveModel(map.ai_model || "");
+      } catch { /* silent */ }
+    };
+    void poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, []);
+
+  // Auto-send initial message from strip input
+  const initialMsgRef = useRef<string | null>(null);
+  const pendingSendRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (initialMessage && initialMessage.trim() && initialMessage !== initialMsgRef.current) {
+      initialMsgRef.current = initialMessage;
+      pendingSendRef.current = initialMessage;
+      setInputValue(initialMessage);
+      onMessageConsumed?.();
+    }
+  }, [initialMessage, onMessageConsumed]);
+
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
+
+  // Track whether we need to auto-send after mount
+  const [autoSendPending, setAutoSendPending] = useState(false);
+  useEffect(() => {
+    if (pendingSendRef.current && inputValue === pendingSendRef.current) {
+      pendingSendRef.current = null;
+      setAutoSendPending(true);
+    }
+  }, [inputValue]);
 
   const captureScreenshot = async () => {
     setIsCapturing(true);
@@ -45,11 +96,13 @@ export default function OverlayChat({ settings, gameName, exeName }: Props) {
       await overlayWin.hide();
       await new Promise((r) => setTimeout(r, 250));
 
-      const base64 = await invoke<string>("capture_screen");
+      const raw = await invoke<string>("capture_screen");
 
       await overlayWin.show();
 
-      setAttachedImage(`data:image/png;base64,${base64}`);
+      // capture_screen returns full data URI, use as-is
+      const dataUri = raw.startsWith("data:") ? raw : `data:image/png;base64,${raw}`;
+      setAttachedImage(dataUri);
       toast.success("Screenshot attached");
     } catch (err) {
       try {
@@ -86,17 +139,18 @@ export default function OverlayChat({ settings, gameName, exeName }: Props) {
 
     try {
       let response = "";
-      if (settings.ai_api_key && settings.ai_provider) {
-        let model = settings.ai_model || "openai/gpt-5.2:online";
-        if (webSearchEnabled && isOpenRouter && !model.endsWith(":online")) model = `${model}:online`;
+      if (liveApiKey && liveProvider) {
+        let model = liveModel || "openai/gpt-5.2:online";
+        const liveIsOpenRouter = liveProvider === "openrouter";
+        if (webSearchEnabled && liveIsOpenRouter && !model.endsWith(":online")) model = `${model}:online`;
         const apiUrl =
-          settings.ai_provider === "openrouter"
+          liveProvider === "openrouter"
             ? "https://openrouter.ai/api/v1/chat/completions"
-            : settings.ai_provider === "openai"
+            : liveProvider === "openai"
               ? "https://api.openai.com/v1/chat/completions"
-              : `${settings.ai_provider}/v1/chat/completions`;
+              : `${liveProvider}/v1/chat/completions`;
 
-        // Build message history — convert to vision format if images are present
+        // Build message history - convert to vision format if images are present
         const apiMessages = messages.map((m) => {
           if (m.imageBase64) {
             return {
@@ -127,7 +181,7 @@ export default function OverlayChat({ settings, gameName, exeName }: Props) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${settings.ai_api_key}`,
+            Authorization: `Bearer ${liveApiKey}`,
           },
           body: JSON.stringify({
             model,
@@ -157,6 +211,18 @@ export default function OverlayChat({ settings, gameName, exeName }: Props) {
     }
   };
 
+  // Auto-send pending message from strip input
+  useEffect(() => {
+    if (autoSendPending) {
+      setAutoSendPending(false);
+      void handleSendMessage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSendPending]);
+
+  // Show setup guide if no API key
+  const hasApiKey = !!(liveApiKey && liveProvider);
+
   return (
     <div className="flex flex-col h-full">
       <div className="px-2.5 py-1.5 border-b border-white/[0.06] flex items-center gap-1.5">
@@ -185,7 +251,20 @@ export default function OverlayChat({ settings, gameName, exeName }: Props) {
 
       <ScrollArea className="flex-1 px-2.5">
         <div ref={chatRef} className="space-y-1.5 py-2">
-          {messages.length === 0 && (
+          {!hasApiKey && messages.length === 0 && (
+            <div className="text-center py-6">
+              <Sparkles className="mx-auto mb-2 size-5 text-yellow-400/40" />
+              <p className="text-[10px] text-yellow-400/70 font-medium mb-1">AI not configured</p>
+              <p className="text-[8px] text-white/30 leading-relaxed max-w-[200px] mx-auto">
+                Set up an API key in Settings &gt; AI Assistant to unlock smart chat.
+                Supports OpenRouter and OpenAI.
+              </p>
+              <p className="text-[7px] text-white/20 mt-2">
+                Without an API key, only basic local responses are available.
+              </p>
+            </div>
+          )}
+          {hasApiKey && messages.length === 0 && (
             <div className="text-center py-8">
               <Sparkles className="mx-auto mb-2 size-5 text-white/15" />
               <p className="text-[9px] text-white/30">

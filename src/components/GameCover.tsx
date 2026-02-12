@@ -89,7 +89,7 @@ export default function GameCover({
           {!loaded && (
             <div className="absolute inset-0 skeleton" />
           )}
-          {/* Actual image — hidden until loaded, blurred if low quality */}
+          {/* Actual image - hidden until loaded, blurred if low quality */}
           <img
             ref={imgRef}
             src={src}

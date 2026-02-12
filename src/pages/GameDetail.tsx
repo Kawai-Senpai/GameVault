@@ -24,6 +24,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
@@ -48,6 +49,11 @@ import {
   Pin,
   PinOff,
   Pencil,
+  FolderPlus,
+  ChevronDown,
+  ChevronRight,
+  Upload,
+  Share2,
 } from "lucide-react";
 import { cn, formatBytes, formatDate, formatRelativeTime } from "@/lib/utils";
 import GameCover from "@/components/GameCover";
@@ -59,13 +65,18 @@ export default function GameDetail() {
   const { games, settings, setGames } = useApp();
   const [activeTab, setActiveTab] = useState("backups");
   const [backups, setBackups] = useState<Backup[]>([]);
-  const [_collections, setCollections] = useState<BackupCollection[]>([]);
+  const [collections, setCollections] = useState<BackupCollection[]>([]);
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
   const [isLoadingBackups, setIsLoadingBackups] = useState(true);
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
   const [backupDialogOpen, setBackupDialogOpen] = useState(false);
   const [backupName, setBackupName] = useState("");
+  const [backupCollectionId, setBackupCollectionId] = useState<string | null>(null);
+  const [collectionDialogOpen, setCollectionDialogOpen] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState("");
+  const [newCollectionColor, setNewCollectionColor] = useState("#6366f1");
+  const [newCollectionMaxBackups, setNewCollectionMaxBackups] = useState(10);
   const [coverChangeOpen, setCoverChangeOpen] = useState(false);
   const [gameNotes, setGameNotes] = useState<GameNote[]>([]);
   const [playtimeDaily, setPlaytimeDaily] = useState<Array<{ day: string; duration_seconds: number }>>([]);
@@ -190,6 +201,15 @@ export default function GameDetail() {
           last_reminded_at: ((r as any).last_reminded_at as string) || null,
           last_shown_at: ((r as any).last_shown_at as string) || null,
           is_dismissed: Boolean((r as any).is_dismissed),
+          tags: (() => {
+            try {
+              const raw = (r as any).tags;
+              if (Array.isArray(raw)) return raw;
+              if (typeof raw === "string") return JSON.parse(raw);
+              return [];
+            } catch { return []; }
+          })(),
+          is_archived: Boolean((r as any).is_archived),
           created_at: r.created_at as string,
           updated_at: r.updated_at as string,
         }))
@@ -198,6 +218,51 @@ export default function GameDetail() {
       console.error("Failed to load game notes:", err);
     }
   }, [gameId]);
+
+  const handleCreateCollection = async () => {
+    if (!gameId || !newCollectionName.trim()) return;
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      const id = crypto.randomUUID();
+      await conn.execute(
+        "INSERT INTO backup_collections (id, game_id, name, max_backups, color) VALUES ($1, $2, $3, $4, $5)",
+        [id, gameId, newCollectionName.trim(), newCollectionMaxBackups, newCollectionColor]
+      );
+      setCollectionDialogOpen(false);
+      setNewCollectionName("");
+      setNewCollectionMaxBackups(10);
+      toast.success("Collection created");
+      loadBackups();
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  };
+
+  const handleDeleteCollection = async (collId: string) => {
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      // Move backups in this collection to uncategorized
+      await conn.execute("UPDATE backups SET collection_id = NULL WHERE collection_id = $1", [collId]);
+      await conn.execute("DELETE FROM backup_collections WHERE id = $1", [collId]);
+      toast.success("Collection deleted, backups moved to Uncategorized");
+      loadBackups();
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  };
+
+  const handleMoveBackup = async (backupId: string, collId: string | null) => {
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      await conn.execute("UPDATE backups SET collection_id = $1 WHERE id = $2", [collId, backupId]);
+      loadBackups();
+    } catch (err) {
+      toast.error(`${err}`);
+    }
+  };
 
   const handleBackup = async () => {
     if (!game || !settings.backup_directory) {
@@ -228,7 +293,7 @@ export default function GameDetail() {
         gameName: game.name,
         savePath,
         displayName: backupName || `Backup ${new Date().toLocaleDateString()}`,
-        collectionId: null,
+        collectionId: backupCollectionId,
         checkDuplicates: true,
       });
 
@@ -239,11 +304,12 @@ export default function GameDetail() {
         const db = await import("@tauri-apps/plugin-sql");
         const conn = await db.default.load("sqlite:gamevault.db");
         await conn.execute(
-          `INSERT INTO backups (id, game_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, datetime('now'))`,
+          `INSERT INTO backups (id, game_id, collection_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, datetime('now'))`,
           [
             result.backup_id,
             game.id,
+            backupCollectionId,
             backupName || `Backup ${new Date().toLocaleDateString()}`,
             result.file_path,
             result.file_size,
@@ -302,6 +368,75 @@ export default function GameDetail() {
       loadBackups();
     } catch (err) {
       toast.error(`Failed to delete: ${err}`);
+    }
+  };
+
+  const handleExportBackup = async (backup: Backup) => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const destFolder = await open({ directory: true, title: "Export Backup To..." });
+      if (!destFolder) return;
+      const toastId = toast.loading("Exporting backup...");
+      const destPath = await invoke<string>("export_backup", {
+        zipPath: backup.file_path,
+        destFolder: destFolder as string,
+      });
+      toast.success(`Backup exported to ${destPath}`, { id: toastId });
+    } catch (err) {
+      toast.error(`Export failed: ${err}`);
+    }
+  };
+
+  const handleImportBackup = async () => {
+    if (!game) return;
+    if (!settings.backup_directory) {
+      toast.error("Set a backup directory in Settings first");
+      return;
+    }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const file = await open({
+        title: "Import Backup (.zip)",
+        filters: [{ name: "Backup Archive", extensions: ["zip"] }],
+        multiple: false,
+      });
+      if (!file) return;
+      const toastId = toast.loading("Importing backup...");
+      const result = await invoke<{
+        backup_id: string;
+        file_path: string;
+        display_name: string;
+        file_size: number;
+        compressed_size: number;
+        content_hash: string;
+        source_path: string;
+      }>("import_external_backup", {
+        sourceZip: file as string,
+        backupDir: settings.backup_directory,
+        gameId: game.id,
+        gameName: game.name,
+      });
+      // Insert into DB
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      await conn.execute(
+        `INSERT OR IGNORE INTO backups (id, game_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, datetime('now'))`,
+        [
+          result.backup_id,
+          game.id,
+          result.display_name,
+          result.file_path,
+          result.file_size,
+          result.compressed_size,
+          result.content_hash,
+          result.source_path,
+        ]
+      );
+      toast.success("Backup imported successfully!", { id: toastId });
+      loadBackups();
+    } catch (err) {
+      toast.error(`Import failed: ${err}`);
     }
   };
 
@@ -707,7 +842,7 @@ export default function GameDetail() {
         {/* Backups Tab */}
         <TabsContent value="backups" className="flex-1 m-0">
           <ScrollArea className="h-full">
-            <div className="p-5 space-y-2">
+            <div className="p-5 space-y-3">
               {isLoadingBackups ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <div key={i} className="flex items-center gap-3 p-3 rounded-lg border">
@@ -719,26 +854,71 @@ export default function GameDetail() {
                     <Skeleton className="h-7 w-16 rounded" />
                   </div>
                 ))
-              ) : backups.length === 0 ? (
+              ) : backups.length === 0 && collections.length === 0 ? (
                 <div className="flex flex-col items-center py-12">
                   <Archive className="size-8 text-muted-foreground/30 mb-2" />
                   <p className="text-xs text-muted-foreground">No backups yet</p>
                   <p className="text-[10px] text-muted-foreground/60 mb-3">
                     Create your first backup to protect your saves
                   </p>
-                  <Button size="sm" onClick={() => setBackupDialogOpen(true)}>
-                    <Save className="size-3" /> Create Backup
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => setBackupDialogOpen(true)}>
+                      <Save className="size-3" /> Create Backup
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={handleImportBackup}>
+                      <Upload className="size-3" /> Import Backup
+                    </Button>
+                  </div>
                 </div>
               ) : (
-                backups.map((backup) => (
-                  <BackupRow
-                    key={backup.id}
-                    backup={backup}
-                    onRestore={() => handleRestore(backup)}
-                    onDelete={() => handleDeleteBackup(backup)}
-                  />
-                ))
+                <>
+                  {/* Actions bar */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button size="sm" variant="outline" className="h-6 text-[9px] gap-1" onClick={() => setCollectionDialogOpen(true)}>
+                      <FolderPlus className="size-2.5" /> New Collection
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-6 text-[9px] gap-1" onClick={handleImportBackup}>
+                      <Upload className="size-2.5" /> Import Backup
+                    </Button>
+                  </div>
+
+                  {/* Collections */}
+                  {collections.map((coll) => {
+                    const collBackups = backups.filter((b) => b.collection_id === coll.id);
+                    return (
+                      <CollectionSection
+                        key={coll.id}
+                        collection={coll}
+                        backups={collBackups}
+                        allCollections={collections}
+                        onRestore={handleRestore}
+                        onDelete={handleDeleteBackup}
+                        onExport={handleExportBackup}
+                        onDeleteCollection={() => handleDeleteCollection(coll.id)}
+                        onMoveBackup={handleMoveBackup}
+                      />
+                    );
+                  })}
+
+                  {/* Uncategorized backups */}
+                  {(() => {
+                    const uncategorized = backups.filter((b) => !b.collection_id);
+                    if (uncategorized.length === 0) return null;
+                    return (
+                      <CollectionSection
+                        key="uncategorized"
+                        collection={null}
+                        backups={uncategorized}
+                        allCollections={collections}
+                        onRestore={handleRestore}
+                        onDelete={handleDeleteBackup}
+                        onExport={handleExportBackup}
+                        onDeleteCollection={() => {}}
+                        onMoveBackup={handleMoveBackup}
+                      />
+                    );
+                  })()}
+                </>
               )}
             </div>
           </ScrollArea>
@@ -845,8 +1025,8 @@ export default function GameDetail() {
                       <p className="text-[11px] font-medium">Auto-Backup</p>
                       <p className="text-[9px] text-muted-foreground">
                         {game.auto_backup_disabled
-                          ? "Disabled — this game is excluded from automatic backups"
-                          : "Enabled — saves are backed up automatically"}
+                          ? "Disabled - this game is excluded from automatic backups"
+                          : "Enabled - saves are backed up automatically"}
                       </p>
                     </div>
                     <Switch
@@ -1057,6 +1237,23 @@ export default function GameDetail() {
                 className="h-8"
               />
             </div>
+            {collections.length > 0 && (
+              <div>
+                <label className="text-[10px] text-muted-foreground mb-1 block">
+                  Collection
+                </label>
+                <select
+                  value={backupCollectionId || ""}
+                  onChange={(e) => setBackupCollectionId(e.target.value || null)}
+                  className="w-full h-8 rounded-md border border-input bg-background px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="">Uncategorized</option>
+                  {collections.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setBackupDialogOpen(false)}>
@@ -1073,6 +1270,74 @@ export default function GameDetail() {
                   <Save className="size-3" /> Create Backup
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Collection Creation Dialog */}
+      <Dialog open={collectionDialogOpen} onOpenChange={setCollectionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Backup Collection</DialogTitle>
+            <DialogDescription>
+              Organize your backups into collections (e.g., "Auto Backups", "Before Boss Fight", etc.)
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-[10px] text-muted-foreground mb-1 block">
+                Collection Name
+              </label>
+              <Input
+                value={newCollectionName}
+                onChange={(e) => setNewCollectionName(e.target.value)}
+                placeholder="e.g. Auto Backups"
+                className="h-8"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newCollectionName.trim()) handleCreateCollection();
+                }}
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-muted-foreground mb-1 block">
+                Max Backups (oldest auto-removed)
+              </label>
+              <Input
+                type="number"
+                value={newCollectionMaxBackups}
+                onChange={(e) => setNewCollectionMaxBackups(parseInt(e.target.value) || 10)}
+                min={1}
+                max={100}
+                className="h-8 w-24"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-muted-foreground mb-1 block">
+                Color
+              </label>
+              <div className="flex gap-1.5 flex-wrap">
+                {["#6366f1", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#ef4444", "#8b5cf6", "#14b8a6"].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={cn(
+                      "size-6 rounded-full border-2 transition-all",
+                      newCollectionColor === c ? "border-foreground scale-110" : "border-transparent opacity-70 hover:opacity-100"
+                    )}
+                    style={{ background: c }}
+                    onClick={() => setNewCollectionColor(c)}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setCollectionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" disabled={!newCollectionName.trim()} onClick={handleCreateCollection}>
+              <FolderPlus className="size-3" /> Create Collection
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1169,23 +1434,112 @@ export default function GameDetail() {
   );
 }
 
-// ─── Backup Row ──────────────────────────────────────────────
-function BackupRow({
-  backup,
+// ─── Collection Section ──────────────────────────────────────
+function CollectionSection({
+  collection,
+  backups,
+  allCollections,
   onRestore,
   onDelete,
+  onExport,
+  onDeleteCollection,
+  onMoveBackup,
+}: {
+  collection: BackupCollection | null;
+  backups: Backup[];
+  allCollections: BackupCollection[];
+  onRestore: (b: Backup) => void;
+  onDelete: (b: Backup) => void;
+  onExport: (b: Backup) => void;
+  onDeleteCollection: () => void;
+  onMoveBackup: (backupId: string, collId: string | null) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const name = collection?.name || "Uncategorized";
+  const color = collection?.color || "#64748b";
+
+  return (
+    <div className="rounded-xl border border-border overflow-hidden">
+      {/* Header */}
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-accent/50 transition-colors text-left"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="size-3 rounded-full shrink-0" style={{ background: color }} />
+        {expanded ? <ChevronDown className="size-3 text-muted-foreground" /> : <ChevronRight className="size-3 text-muted-foreground" />}
+        <span className="text-[11px] font-semibold flex-1">{name}</span>
+        <Badge variant="secondary" className="text-[8px] px-1.5 py-0">{backups.length}</Badge>
+        {collection && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+              <Button variant="ghost" size="icon-sm" className="size-5">
+                <MoreVertical className="size-2.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem className="text-[10px]">
+                Max: {collection.max_backups} backups
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive text-[10px]" onClick={onDeleteCollection}>
+                <Trash2 className="size-2.5" /> Delete Collection
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </button>
+
+      {/* Backup list */}
+      {expanded && (
+        <div className="border-t border-border">
+          {backups.length === 0 ? (
+            <div className="py-6 text-center">
+              <p className="text-[10px] text-muted-foreground/50">No backups in this collection</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {backups.map((backup) => (
+                <BackupRowInCollection
+                  key={backup.id}
+                  backup={backup}
+                  allCollections={allCollections}
+                  onRestore={() => onRestore(backup)}
+                  onDelete={() => onDelete(backup)}
+                  onExport={() => onExport(backup)}
+                  onMoveBackup={onMoveBackup}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Backup Row (inside collection) ─────────────────────────
+function BackupRowInCollection({
+  backup,
+  allCollections,
+  onRestore,
+  onDelete,
+  onExport,
+  onMoveBackup,
 }: {
   backup: Backup;
+  allCollections: BackupCollection[];
   onRestore: () => void;
   onDelete: () => void;
+  onExport: () => void;
+  onMoveBackup: (backupId: string, collId: string | null) => void;
 }) {
   return (
-    <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card hover:border-primary/20 transition-colors animate-slide-up">
-      <div className="size-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-        <Archive className="size-4 text-primary" />
+    <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-accent/30 transition-colors">
+      <div className="size-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+        <Archive className="size-3.5 text-primary" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-xs font-medium truncate">
+        <div className="text-[11px] font-medium truncate">
           {backup.display_name || "Unnamed Backup"}
         </div>
         <div className="flex items-center gap-2 text-[9px] text-muted-foreground">
@@ -1200,12 +1554,44 @@ function BackupRow({
         </div>
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <Button variant="outline" size="sm" onClick={onRestore}>
-          <RotateCcw className="size-3" /> Restore
+        <Button variant="outline" size="sm" className="h-6 text-[9px]" onClick={onRestore}>
+          <RotateCcw className="size-2.5" /> Restore
         </Button>
-        <Button variant="ghost" size="icon-sm" onClick={onDelete}>
-          <Trash2 className="size-3 text-destructive" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-sm" className="size-6">
+              <MoreVertical className="size-2.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem className="text-[10px]" onClick={onExport}>
+              <Share2 className="size-2.5" /> Export / Share
+            </DropdownMenuItem>
+            {allCollections.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[9px]">Move to...</DropdownMenuLabel>
+                {backup.collection_id && (
+                  <DropdownMenuItem className="text-[10px]" onClick={() => onMoveBackup(backup.id, null)}>
+                    Uncategorized
+                  </DropdownMenuItem>
+                )}
+                {allCollections
+                  .filter((c) => c.id !== backup.collection_id)
+                  .map((c) => (
+                    <DropdownMenuItem key={c.id} className="text-[10px]" onClick={() => onMoveBackup(backup.id, c.id)}>
+                      <div className="size-2 rounded-full shrink-0" style={{ background: c.color }} />
+                      {c.name}
+                    </DropdownMenuItem>
+                  ))}
+              </>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-destructive text-[10px]" onClick={onDelete}>
+              <Trash2 className="size-2.5" /> Delete Backup
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   );

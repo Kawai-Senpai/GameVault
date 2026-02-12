@@ -42,6 +42,7 @@ open = "5"
 reqwest = { version = "0.12", features = ["json"] }
 directories = "5"
 sysinfo = "0.33"
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [

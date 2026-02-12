@@ -85,7 +85,7 @@
   --warning: oklch(0.75 0.18 75);
 }
 
-/* ─── Dark Theme (Gaming-inspired — Red accent) ─────────────── */
+/* ─── Dark Theme (Gaming-inspired - Red accent) ─────────────── */
 .dark {
   --background: oklch(0.10 0.005 25);
   --foreground: oklch(0.93 0 0);

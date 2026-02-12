@@ -27,7 +27,7 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         ],
     )?;
 
-    // Load tray icon — try embedded icon first, then fall back to decoding PNG
+    // Load tray icon - try embedded icon first, then fall back to decoding PNG
     let tray_icon = app.default_window_icon().cloned().unwrap_or_else(|| {
         // Decode the embedded PNG at compile time using the `image` crate
         let png_bytes = include_bytes!("../icons/icon.png");
@@ -97,7 +97,9 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "quit" => {
-                app.exit(0);
+                // Use std::process::exit to bypass the RunEvent::ExitRequested handler
+                // which prevents exit (to keep tray alive). This is the explicit user quit.
+                std::process::exit(0);
             }
             _ => {}
         })

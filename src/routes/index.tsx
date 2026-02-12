@@ -18,7 +18,7 @@ import { useApp } from "@/contexts/app.context";
 export default function AppRoutes() {
   const { setupComplete, isLoading } = useApp();
 
-  // Overlay window detection — renders a separate minimal UI
+  // Overlay window detection - renders a separate minimal UI
   const isOverlay = window.location.pathname === "/overlay" ||
     new URLSearchParams(window.location.search).get("window") === "overlay";
   if (isOverlay) {

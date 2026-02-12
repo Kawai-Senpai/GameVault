@@ -60,6 +60,15 @@ export default function OverlayNotes({ gameId, gameName }: Props) {
           last_reminded_at: ((r as any).last_reminded_at as string) || null,
           last_shown_at: ((r as any).last_shown_at as string) || null,
           is_dismissed: Boolean((r as any).is_dismissed),
+          tags: (() => {
+            try {
+              const raw = (r as any).tags;
+              if (Array.isArray(raw)) return raw;
+              if (typeof raw === "string") return JSON.parse(raw);
+              return [];
+            } catch { return []; }
+          })(),
+          is_archived: Boolean((r as any).is_archived),
           created_at: r.created_at as string,
           updated_at: r.updated_at as string,
         }))
