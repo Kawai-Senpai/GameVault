@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/contexts/app.context";
 import { useTheme } from "@/contexts/theme.context";
 import Header from "@/components/Header";
@@ -72,6 +72,34 @@ export default function Settings() {
     downloadProgress: "",
     error: "",
   });
+
+  // Auto-check for updates when Settings page is opened
+  useEffect(() => {
+    const autoCheck = async () => {
+      try {
+        const result = await invoke<{
+          current_version: string;
+          latest_version: string;
+          update_available: boolean;
+          release_url: string;
+          release_notes: string;
+          download_url: string;
+          download_size: number;
+        }>("check_for_updates");
+        if (result.update_available) {
+          setUpdateInfo((prev) => ({
+            ...prev,
+            available: true,
+            latestVersion: result.latest_version,
+            releaseNotes: result.release_notes,
+            downloadUrl: result.download_url,
+            downloadSize: result.download_size,
+          }));
+        }
+      } catch { /* silent */ }
+    };
+    void autoCheck();
+  }, []);
 
   const handleUpdate = useCallback(
     async (key: keyof AppSettings, value: unknown) => {
@@ -375,9 +403,9 @@ export default function Settings() {
                     handleUpdate("ai_provider", v);
                     // Auto-set default model when switching
                     if (v === "openai" && settings.ai_model.includes("/")) {
-                      handleUpdate("ai_model", "gpt-4o-mini");
+                      handleUpdate("ai_model", "gpt-5.2");
                     } else if (v === "openrouter" && !settings.ai_model.includes("/")) {
-                      handleUpdate("ai_model", "openai/gpt-4o-mini");
+                      handleUpdate("ai_model", "openai/gpt-5.2:online");
                     }
                   }}
                 >
@@ -455,13 +483,13 @@ export default function Settings() {
                 <Label className="text-[10px]">Model</Label>
                 <p className="text-[9px] text-muted-foreground mb-1">
                   {settings.ai_provider === "openrouter"
-                    ? "Use OpenRouter format: provider/model (e.g. openai/gpt-4o-mini)"
-                    : "Use OpenAI model name (e.g. gpt-4o-mini)"}
+                    ? "Use OpenRouter format: provider/model (e.g. openai/gpt-5.2:online)"
+                    : "Use OpenAI model name (e.g. gpt-5.2)"}
                 </p>
                 <Input
                   value={settings.ai_model}
                   onChange={(e) => handleUpdate("ai_model", e.target.value)}
-                  placeholder={settings.ai_provider === "openrouter" ? "openai/gpt-4o:online" : "gpt-5.2"}
+                  placeholder={settings.ai_provider === "openrouter" ? "openai/gpt-5.2:online" : "gpt-5.2"}
                   className="w-full text-[10px] font-mono"
                 />
               </div>

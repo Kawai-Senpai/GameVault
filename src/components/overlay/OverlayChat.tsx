@@ -87,7 +87,7 @@ export default function OverlayChat({ settings, gameName, exeName }: Props) {
     try {
       let response = "";
       if (settings.ai_api_key && settings.ai_provider) {
-        let model = settings.ai_model || "openai/gpt-4o-mini";
+        let model = settings.ai_model || "openai/gpt-5.2:online";
         if (webSearchEnabled && isOpenRouter && !model.endsWith(":online")) model = `${model}:online`;
         const apiUrl =
           settings.ai_provider === "openrouter"

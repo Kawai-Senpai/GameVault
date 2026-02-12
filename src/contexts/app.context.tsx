@@ -61,7 +61,7 @@ const defaultSettings: AppSettings = {
   ai_api_key: "",
   ai_openrouter_api_key: "",
   ai_openai_api_key: "",
-  ai_model: "openai/gpt-4o:online",
+  ai_model: "openai/gpt-5.2:online",
   overlay_shortcut: "Ctrl+Shift+G",
   screenshot_shortcut: "F12",
   quick_backup_shortcut: "Ctrl+Shift+B",
@@ -595,6 +595,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(timer);
   }, [runAutoBackup, settingsLoaded]);
 
+  // ── Auto-update check: on startup (10s delay) + every 24 hours ──
+  useEffect(() => {
+    if (!settingsLoaded || isOverlay) return;
+
+    const checkForUpdate = async () => {
+      try {
+        const result = await invoke<{
+          current_version: string;
+          latest_version: string;
+          update_available: boolean;
+          release_url: string;
+          download_url: string;
+          download_size: number;
+        }>("check_for_updates");
+
+        if (result.update_available) {
+          toast.info(
+            `Update available: v${result.latest_version}`,
+            {
+              description: "A new version of GameVault is available. Go to Settings → check for updates to install it.",
+              duration: 15000,
+              action: {
+                label: "Open Settings",
+                onClick: () => {
+                  // Navigate to settings if possible
+                  window.location.hash = "#/settings";
+                  window.dispatchEvent(new CustomEvent("navigate-to-settings"));
+                },
+              },
+            }
+          );
+        }
+      } catch {
+        // Silent — don't bother the user if the update check fails
+      }
+    };
+
+    // Check after 10 second delay (let the app fully load first)
+    const startupTimer = window.setTimeout(checkForUpdate, 10_000);
+    // Re-check every 24 hours while the app is running
+    const recurringTimer = window.setInterval(checkForUpdate, 24 * 60 * 60 * 1000);
+
+    return () => {
+      window.clearTimeout(startupTimer);
+      window.clearInterval(recurringTimer);
+    };
+  }, [settingsLoaded, isOverlay]);
+
   useEffect(() => {
     const resolveGame = () => {
       if (selectedGameId) {
@@ -754,7 +802,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             if (value === "openai" && updated.ai_model.includes("/")) {
               updated.ai_model = "gpt-5.2";
             } else if (value === "openrouter" && !updated.ai_model.includes("/")) {
-              updated.ai_model = "openai/gpt-4o:online";
+              updated.ai_model = "openai/gpt-5.2:online";
             }
           } else if (key === "ai_openrouter_api_key" && updated.ai_provider === "openrouter") {
             updated.ai_api_key = value;

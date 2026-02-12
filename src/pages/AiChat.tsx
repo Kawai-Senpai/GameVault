@@ -92,7 +92,7 @@ export default function AiChat() {
 
       if (hasApiKey && settings.ai_provider) {
         // Real AI call via OpenRouter / OpenAI
-        let model = settings.ai_model || "openai/gpt-4o-mini";
+        let model = settings.ai_model || "openai/gpt-5.2:online";
 
         // Append :online for web search (OpenRouter only)
         if (webSearchEnabled && isOpenRouter && !model.endsWith(":online")) {

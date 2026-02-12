@@ -224,6 +224,16 @@ pub fn run() {
                             "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        // Migration 5: Update default AI model to gpt-5.2
+                        tauri_plugin_sql::Migration {
+                            version: 5,
+                            description: "Update default AI model",
+                            sql: r#"
+                                UPDATE settings SET value = 'openai/gpt-5.2:online' WHERE key = 'ai_model' AND value = 'openai/gpt-4o-mini';
+                                UPDATE settings SET value = 'openai/gpt-5.2:online' WHERE key = 'ai_model' AND value = 'openai/gpt-4o:online';
+                            "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -408,6 +418,25 @@ fn get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Compare semver: returns true if `latest` is strictly newer than `current`.
+fn is_version_newer(latest: &str, current: &str) -> bool {
+    let parse = |v: &str| -> (u64, u64, u64) {
+        let parts: Vec<u64> = v
+            .trim_start_matches('v')
+            .split('.')
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        (
+            parts.first().copied().unwrap_or(0),
+            parts.get(1).copied().unwrap_or(0),
+            parts.get(2).copied().unwrap_or(0),
+        )
+    };
+    let (lmaj, lmin, lpatch) = parse(latest);
+    let (cmaj, cmin, cpatch) = parse(current);
+    (lmaj, lmin, lpatch) > (cmaj, cmin, cpatch)
+}
+
 #[tauri::command]
 async fn check_for_updates() -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
@@ -443,10 +472,13 @@ async fn check_for_updates() -> Result<serde_json::Value, String> {
         }
     }
 
+    // Semantic version comparison (major.minor.patch)
+    let is_newer = is_version_newer(latest_version, current);
+
     Ok(serde_json::json!({
         "current_version": current,
         "latest_version": latest_version,
-        "update_available": latest_version != current,
+        "update_available": is_newer,
         "release_url": json["html_url"].as_str().unwrap_or(""),
         "release_notes": json["body"].as_str().unwrap_or(""),
         "download_url": download_url,
