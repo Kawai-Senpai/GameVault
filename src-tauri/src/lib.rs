@@ -5,6 +5,7 @@ mod keymapper;
 mod perf;
 mod recording;
 mod screenshots;
+mod shortcuts;
 mod tray;
 
 use tauri::Manager;
@@ -13,7 +14,33 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(move |app, shortcut, event| {
+                use tauri_plugin_global_shortcut::{Shortcut as Sc, ShortcutState};
+                if event.state() == ShortcutState::Pressed {
+                    // Look up the action by re-parsing stored shortcut strings and comparing
+                    let action_id = {
+                        let state = app.state::<shortcuts::RegisteredShortcuts>();
+                        let map = match state.map.lock() {
+                            Ok(guard) => guard,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        map.iter().find_map(|(key_str, action)| {
+                            if let Ok(s) = key_str.parse::<Sc>() {
+                                if &s == shortcut {
+                                    return Some(action.clone());
+                                }
+                            }
+                            None
+                        })
+                    };
+                    if let Some(action) = action_id {
+                        shortcuts::handle_shortcut_action(app, &action);
+                    }
+                }
+            })
+            .build()
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -229,7 +256,7 @@ pub fn run() {
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_openai_api_key', '');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_model', 'openai/gpt-5.2:online');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('overlay_shortcut', 'Ctrl+Shift+G');
-                                INSERT OR IGNORE INTO settings (key, value) VALUES ('screenshot_shortcut', 'F12');
+                                INSERT OR IGNORE INTO settings (key, value) VALUES ('screenshot_shortcut', 'Ctrl+Shift+S');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('quick_backup_shortcut', 'Ctrl+Shift+B');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('setup_complete', 'false');
                                 INSERT OR IGNORE INTO settings (key, value) VALUES ('auto_backup_enabled', 'true');
@@ -249,7 +276,7 @@ pub fn run() {
 
                                 -- Default shortcuts
                                 INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s1', 'toggle_overlay', 'Toggle Overlay', 'Ctrl+Shift+G', 1, 'overlay');
-                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s2', 'take_screenshot', 'Take Screenshot', 'F12', 1, 'screenshots');
+                                INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s2', 'take_screenshot', 'Take Screenshot', 'Ctrl+Shift+S', 1, 'screenshots');
                                 INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s3', 'quick_backup', 'Quick Backup', 'Ctrl+Shift+B', 1, 'backups');
                                 INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s4', 'toggle_key_mappings', 'Toggle Key Mappings', 'Ctrl+Shift+K', 1, 'keymapper');
                                 INSERT OR IGNORE INTO shortcuts (id, action_id, label, keys, is_global, category) VALUES ('s5', 'toggle_macros', 'Toggle Macros', 'Ctrl+Shift+M', 1, 'macros');
@@ -261,6 +288,7 @@ pub fn run() {
                 )
                 .build(),
         )
+        .manage(shortcuts::RegisteredShortcuts::default())
         .setup(|app| {
             // Build system tray
             tray::build_tray(app)?;
@@ -327,6 +355,11 @@ pub fn run() {
             keymapper::simulate_key_press,
             keymapper::simulate_key_release,
             keymapper::simulate_key_tap,
+            // Shortcuts
+            shortcuts::check_shortcuts_registered,
+            shortcuts::get_registered_shortcuts,
+            shortcuts::validate_shortcut_key,
+            shortcuts::update_shortcuts,
             // Performance
             perf::get_performance_snapshot,
             // AI commands

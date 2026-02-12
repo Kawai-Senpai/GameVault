@@ -77,7 +77,7 @@ const defaultSettings: AppSettings = {
   ai_openai_api_key: "",
   ai_model: "openai/gpt-5.2:online",
   overlay_shortcut: "Ctrl+Shift+G",
-  screenshot_shortcut: "F12",
+  screenshot_shortcut: "Ctrl+Shift+S",
   quick_backup_shortcut: "Ctrl+Shift+B",
   setup_complete: false,
   recordings_directory: "",
@@ -214,167 +214,49 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(timer);
   }, [settingsLoaded, isOverlay]);
 
-  // Register global shortcuts for active key mappings and macros
-  useKeyEngine(activeKeyMappings, activeMacros, settingsLoaded && !isOverlay);
+  // App-level shortcut combos reserved for Rust-side handling (overlay, screenshot, backup, recording)
+  const reservedShortcuts = [
+    settings.overlay_shortcut,
+    settings.screenshot_shortcut,
+    settings.quick_backup_shortcut,
+    settings.recording_shortcut,
+  ].filter(Boolean);
 
-  // ── Register app-level global shortcuts (overlay, screenshot, backup) ──
+  // Register global shortcuts for active key mappings and macros (excludes reserved shortcuts)
+  useKeyEngine(activeKeyMappings, activeMacros, settingsLoaded && !isOverlay, reservedShortcuts);
+
+  // ── Register app-level global shortcuts via Rust ──
+  // Sends shortcut config to Rust, which handles registration.
+  // Rust fires events back when shortcuts are pressed.
   useEffect(() => {
     if (!settingsLoaded || isOverlay) return;
 
     let cancelled = false;
-    const registeredShortcuts: string[] = [];
 
-    const registerAppShortcuts = async () => {
-      let plugin: any = null;
+    const sendShortcutsToRust = async () => {
       try {
-        plugin = await import("@tauri-apps/plugin-global-shortcut");
-      } catch {
-        console.warn("[AppShortcuts] global-shortcut plugin not available");
-        return;
-      }
-      if (cancelled || !plugin) return;
+        const { comboToTauriShortcut } = await import("@/lib/keycode-map");
+        const bindings = [
+          { action: "toggle_overlay", key: comboToTauriShortcut(settings.overlay_shortcut || ""), enabled: !!settings.overlay_shortcut },
+          { action: "take_screenshot", key: comboToTauriShortcut(settings.screenshot_shortcut || ""), enabled: !!settings.screenshot_shortcut },
+          { action: "quick_backup", key: comboToTauriShortcut(settings.quick_backup_shortcut || ""), enabled: !!settings.quick_backup_shortcut },
+          { action: "toggle_recording", key: comboToTauriShortcut(settings.recording_shortcut || ""), enabled: !!settings.recording_shortcut },
+        ].filter((b) => b.key.trim().length > 0);
 
-      const { comboToTauriShortcut } = await import("@/lib/keycode-map");
-
-      const shortcuts: { combo: string; action: () => Promise<void> }[] = [
-        {
-          combo: settings.overlay_shortcut,
-          action: async () => { try { await invoke("toggle_overlay"); } catch (e) { console.error("[Shortcut] toggle_overlay:", e); } },
-        },
-        {
-          combo: settings.screenshot_shortcut,
-          action: async () => {
-            try {
-              if (!settings.screenshots_directory) { console.warn("[Shortcut] No screenshots directory set"); return; }
-              // Capture screen as base64, then save to disk
-              const base64 = await invoke<string>("capture_screen");
-              const result = await invoke<{
-                id: string;
-                file_path: string;
-                thumbnail_path: string;
-                width: number;
-                height: number;
-                file_size: number;
-              }>("save_screenshot_file", {
-                screenshotsDir: settings.screenshots_directory,
-                gameId: selectedGameId || "_general",
-                base64Data: base64,
-                filename: null,
-              });
-              // Save to database
-              const db = await import("@tauri-apps/plugin-sql");
-              const conn = await db.default.load("sqlite:gamevault.db");
-              await conn.execute(
-                `INSERT INTO screenshots (id, game_id, file_path, thumbnail_path, width, height, file_size, captured_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, datetime('now'))`,
-                [result.id, selectedGameId || "_general", result.file_path, result.thumbnail_path, result.width, result.height, result.file_size]
-              );
-              toast.success("Screenshot captured!");
-            } catch (e) { console.error("[Shortcut] screenshot:", e); }
-          },
-        },
-        {
-          combo: settings.quick_backup_shortcut,
-          action: async () => {
-            const currentGame = games.find((g) => g.id === selectedGameId) || null;
-            if (!currentGame || !settings.backup_directory || currentGame.save_paths.length === 0) return;
-            try {
-              const toastId = toast.loading("Quick backup...");
-              await invoke("create_backup", {
-                backupDir: settings.backup_directory,
-                gameId: currentGame.id,
-                gameName: currentGame.name,
-                savePath: currentGame.save_paths[0],
-                displayName: `Quick backup`,
-                collectionId: null,
-                checkDuplicates: true,
-              });
-              toast.success("Quick backup done!", { id: toastId });
-            } catch (e) { console.error("[Shortcut] backup:", e); }
-          },
-        },
-        {
-          combo: settings.recording_shortcut,
-          action: async () => {
-            try {
-              const status = await invoke<{ is_recording: boolean }>("get_recording_status");
-              if (status.is_recording) {
-                const result = await invoke<{
-                  id: string;
-                  file_path: string;
-                  thumbnail_path: string;
-                  width: number;
-                  height: number;
-                  file_size: number;
-                  duration_seconds: number;
-                }>("stop_recording");
-                // Save to database
-                const db = await import("@tauri-apps/plugin-sql");
-                const conn = await db.default.load("sqlite:gamevault.db");
-                await conn.execute(
-                  `INSERT INTO recordings (id, game_id, file_path, thumbnail_path, width, height, file_size, duration_seconds, fps, recorded_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, datetime('now'))`,
-                  [
-                    result.id, selectedGameId || "_general", result.file_path, result.thumbnail_path,
-                    result.width, result.height, result.file_size,
-                    result.duration_seconds, settings.recording_fps || 30,
-                  ]
-                );
-                toast.success("Recording saved!");
-              } else {
-                const recDir = settings.recordings_directory || settings.screenshots_directory;
-                if (!recDir) { toast.error("Set recordings directory in Settings"); return; }
-                // Resolve best ffmpeg path (user → bundled → system)
-                const ffmpegPath = await invoke<string>("resolve_ffmpeg", { userPath: settings.ffmpeg_path || null });
-                await invoke<string>("start_recording", {
-                  recordingsDir: recDir,
-                  gameId: selectedGameId || "_general",
-                  ffmpegPath,
-                  fps: settings.recording_fps || 30,
-                  resolution: settings.recording_resolution === "native" ? null : settings.recording_resolution,
-                  quality: settings.recording_quality || "medium",
-                });
-                toast.success("Recording started!");
-              }
-            } catch (e: any) { toast.error(`Recording: ${e}`); }
-          },
-        },
-      ];
-
-      for (const { combo, action } of shortcuts) {
-        if (!combo || combo.trim().length === 0) continue;
-        const tauriCombo = comboToTauriShortcut(combo);
-        try {
-          if (await plugin.isRegistered(tauriCombo)) {
-            await plugin.unregister(tauriCombo);
-          }
-          await plugin.register(tauriCombo, async (event: any) => {
-            if (event.state === "Pressed") await action();
-          });
-          registeredShortcuts.push(tauriCombo);
-        } catch (err) {
-          console.warn(`[AppShortcuts] Failed to register ${tauriCombo}:`, err);
+        if (!cancelled) {
+          await invoke("update_shortcuts", { config: { bindings } });
         }
+      } catch (err) {
+        console.warn("[AppShortcuts] Failed to send shortcuts to Rust:", err);
       }
     };
 
-    registerAppShortcuts();
+    void sendShortcutsToRust();
 
+    // Cleanup: unregister all app shortcuts when effect re-fires (React strict mode)
     return () => {
       cancelled = true;
-      // Cleanup on unmount or re-registration
-      (async () => {
-        try {
-          const plugin = await import("@tauri-apps/plugin-global-shortcut");
-          for (const sc of registeredShortcuts) {
-            try {
-              if (await plugin.isRegistered(sc)) {
-                await plugin.unregister(sc);
-              }
-            } catch { /* ignore */ }
-          }
-        } catch { /* ignore */ }
-      })();
+      invoke("update_shortcuts", { config: { bindings: [] } }).catch(() => {});
     };
   }, [
     settingsLoaded,
@@ -383,12 +265,143 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     settings.screenshot_shortcut,
     settings.quick_backup_shortcut,
     settings.recording_shortcut,
-    settings.backup_directory,
-    settings.screenshots_directory,
-    settings.recordings_directory,
-    selectedGameId,
-    games,
   ]);
+
+  // ── Listen for shortcut events from Rust ──
+  // Rust fires "shortcut-triggered" with { action: string }
+  // Refs ensure we always use the latest state values.
+  const gamesRef = useRef(games);
+  gamesRef.current = games;
+  const selectedGameIdRef = useRef(selectedGameId);
+  selectedGameIdRef.current = selectedGameId;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
+  useEffect(() => {
+    if (isOverlay) return;
+    let cancelled = false;
+    const cleanups: (() => void)[] = [];
+
+    const setup = async () => {
+      const unlistenAction = await listen<{ action: string }>("shortcut-triggered", async (event) => {
+        if (cancelled) return;
+        const { action } = event.payload;
+        const s = settingsRef.current;
+        const currentGameId = selectedGameIdRef.current;
+        const currentGames = gamesRef.current;
+
+        switch (action) {
+          case "take_screenshot": {
+            try {
+              if (!s.screenshots_directory) { toast.error("Set screenshots directory in Settings first"); return; }
+              const base64 = await invoke<string>("capture_screen");
+              const result = await invoke<{
+                id: string; file_path: string; thumbnail_path: string;
+                width: number; height: number; file_size: number;
+              }>("save_screenshot_file", {
+                screenshotsDir: s.screenshots_directory,
+                gameId: currentGameId || "_general",
+                base64Data: base64,
+                filename: null,
+              });
+              const db = await import("@tauri-apps/plugin-sql");
+              const conn = await db.default.load("sqlite:gamevault.db");
+              await conn.execute(
+                `INSERT INTO screenshots (id, game_id, file_path, thumbnail_path, width, height, file_size, captured_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, datetime('now'))`,
+                [result.id, currentGameId || "_general", result.file_path, result.thumbnail_path, result.width, result.height, result.file_size]
+              );
+              toast.success("Screenshot captured!");
+            } catch (e) { toast.error(`Screenshot failed: ${e}`); }
+            break;
+          }
+          case "quick_backup": {
+            const currentGame = currentGames.find((g) => g.id === currentGameId) || null;
+            if (!currentGame) { toast.error("Select a game first for quick backup"); return; }
+            if (!s.backup_directory) { toast.error("Set backup directory in Settings first"); return; }
+            if (currentGame.save_paths.length === 0) { toast.error("No save paths configured for this game"); return; }
+            try {
+              const toastId = toast.loading("Quick backup...");
+              await invoke("create_backup", {
+                backupDir: s.backup_directory,
+                gameId: currentGame.id,
+                gameName: currentGame.name,
+                savePath: currentGame.save_paths[0],
+                displayName: "Quick backup",
+                collectionId: null,
+                checkDuplicates: true,
+              });
+              toast.success("Quick backup done!", { id: toastId });
+            } catch (e) { toast.error(`Backup failed: ${e}`); }
+            break;
+          }
+          case "toggle_recording": {
+            try {
+              const status = await invoke<{ is_recording: boolean }>("get_recording_status");
+              if (status.is_recording) {
+                const result = await invoke<{
+                  id: string; file_path: string; thumbnail_path: string;
+                  width: number; height: number; file_size: number;
+                  duration_seconds: number;
+                }>("stop_recording");
+                const db = await import("@tauri-apps/plugin-sql");
+                const conn = await db.default.load("sqlite:gamevault.db");
+                await conn.execute(
+                  `INSERT INTO recordings (id, game_id, file_path, thumbnail_path, width, height, file_size, duration_seconds, fps, recorded_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, datetime('now'))`,
+                  [result.id, currentGameId || "_general", result.file_path, result.thumbnail_path,
+                   result.width, result.height, result.file_size, result.duration_seconds, s.recording_fps || 30]
+                );
+                toast.success("Recording saved!");
+              } else {
+                const recDir = s.recordings_directory || s.screenshots_directory;
+                if (!recDir) { toast.error("Set recordings directory in Settings"); return; }
+                const ffmpegPath = await invoke<string>("resolve_ffmpeg", { userPath: s.ffmpeg_path || null });
+                await invoke<string>("start_recording", {
+                  recordingsDir: recDir,
+                  gameId: currentGameId || "_general",
+                  ffmpegPath,
+                  fps: s.recording_fps || 30,
+                  resolution: s.recording_resolution === "native" ? null : s.recording_resolution,
+                  quality: s.recording_quality || "medium",
+                });
+                toast.success("Recording started!");
+              }
+            } catch (e: any) { toast.error(`Recording: ${e}`); }
+            break;
+          }
+          default:
+            console.log("[Shortcut] Unknown action:", action);
+        }
+      });
+      cleanups.push(unlistenAction);
+
+      // Listen for registration errors
+      const unlistenErrors = await listen<string[]>("shortcut-registration-error", (event) => {
+        if (cancelled) return;
+        for (const err of event.payload) {
+          console.warn("[Shortcut registration]", err);
+        }
+        if (event.payload.length > 0) {
+          const preview = event.payload.slice(0, 2).join(" | ");
+          toast.error(`Some shortcuts could not be registered: ${preview}`);
+        }
+      });
+      cleanups.push(unlistenErrors);
+
+      // If cancelled while we were setting up, immediately clean up
+      if (cancelled) {
+        unlistenAction();
+        unlistenErrors();
+      }
+    };
+
+    void setup();
+    return () => {
+      cancelled = true;
+      cleanups.forEach((fn) => fn());
+    };
+  }, [isOverlay]);
 
   // ── Background game session detection (external launches) ─────────────────
   // Powers:
@@ -1096,163 +1109,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [settingsLoaded, isOverlay]);
 
-  useEffect(() => {
-    const resolveGame = () => {
-      if (selectedGameId) {
-        const selected = games.find((g) => g.id === selectedGameId);
-        if (selected) return selected;
-      }
-      return games.find((g) => g.save_paths.length > 0) || games[0] || null;
-    };
-
-    const onQuickBackup = async () => {
-      const game = resolveGame();
-      if (!game) return toast.error("No game available for quick backup");
-      if (!settings.backup_directory) return toast.error("Set backup directory in Settings");
-      if (!game.save_paths.length) return toast.error(`No save path configured for ${game.name}`);
-
-      const toastId = toast.loading(`Quick backup: ${game.name}`);
-      try {
-        const expanded = await invoke<string>("expand_env_path", { path: game.save_paths[0] });
-        const result = await invoke<{
-          backup_id: string;
-          file_path: string;
-          file_size: number;
-          compressed_size: number;
-          content_hash: string;
-          skipped_duplicate: boolean;
-          message: string;
-        }>("create_backup", {
-          backupDir: settings.backup_directory,
-          gameId: game.id,
-          gameName: game.name,
-          savePath: expanded,
-          displayName: `Tray Backup ${new Date().toLocaleTimeString()}`,
-          collectionId: null,
-          checkDuplicates: true,
-        });
-
-        if (!result.skipped_duplicate) {
-          const db = await import("@tauri-apps/plugin-sql");
-          const conn = await db.default.load("sqlite:gamevault.db");
-          await conn.execute(
-            `INSERT INTO backups (id, game_id, display_name, file_path, file_size, compressed_size, content_hash, source_path, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, datetime('now'))`,
-            [
-              result.backup_id,
-              game.id,
-              `Tray Backup ${new Date().toLocaleTimeString()}`,
-              result.file_path,
-              result.file_size,
-              result.compressed_size,
-              result.content_hash,
-              expanded,
-            ]
-          );
-        }
-        toast.success(result.message, { id: toastId });
-      } catch (err) {
-        toast.error(`Quick backup failed: ${err}`, { id: toastId });
-      }
-    };
-
-    const onTakeScreenshot = async () => {
-      const game = resolveGame();
-      if (!game) return toast.error("No game available for screenshot");
-      if (!settings.screenshots_directory) return toast.error("Set screenshots directory in Settings");
-
-      const toastId = toast.loading(`Capturing screenshot: ${game.name}`);
-      try {
-        const base64 = await invoke<string>("capture_screen");
-        const result = await invoke<{
-          id: string;
-          file_path: string;
-          thumbnail_path: string;
-          width: number;
-          height: number;
-          file_size: number;
-        }>("save_screenshot_file", {
-          screenshotsDir: settings.screenshots_directory,
-          gameId: game.id,
-          base64Data: base64,
-        });
-
-        const db = await import("@tauri-apps/plugin-sql");
-        const conn = await db.default.load("sqlite:gamevault.db");
-        await conn.execute(
-          `INSERT INTO screenshots (id, game_id, file_path, thumbnail_path, width, height, file_size, captured_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, datetime('now'))`,
-          [
-            result.id,
-            game.id,
-            result.file_path,
-            result.thumbnail_path,
-            result.width,
-            result.height,
-            result.file_size,
-          ]
-        );
-        toast.success("Screenshot captured", { id: toastId });
-      } catch (err) {
-        toast.error(`Screenshot failed: ${err}`, { id: toastId });
-      }
-    };
-
-    let unlistenBackup: (() => void) | null = null;
-    let unlistenScreenshot: (() => void) | null = null;
-    let unlistenRecording: (() => void) | null = null;
-    listen("tray-quick-backup", onQuickBackup).then((fn) => {
-      unlistenBackup = fn;
-    });
-    listen("tray-take-screenshot", onTakeScreenshot).then((fn) => {
-      unlistenScreenshot = fn;
-    });
-    listen("tray-toggle-recording", async () => {
-      try {
-        const status = await invoke<{ is_recording: boolean }>("get_recording_status");
-        if (status.is_recording) {
-          const result = await invoke<{
-            id: string; file_path: string; thumbnail_path: string;
-            width: number; height: number; file_size: number; duration_seconds: number;
-          }>("stop_recording");
-          const db = await import("@tauri-apps/plugin-sql");
-          const conn = await db.default.load("sqlite:gamevault.db");
-          await conn.execute(
-            `INSERT INTO recordings (id, game_id, file_path, thumbnail_path, width, height, file_size, duration_seconds, fps, recorded_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, datetime('now'))`,
-            [result.id, selectedGameId || "_general", result.file_path, result.thumbnail_path,
-             result.width, result.height, result.file_size, result.duration_seconds, settings.recording_fps || 30]
-          );
-          toast.success("Recording saved!");
-        } else {
-          const recDir = settings.recordings_directory || settings.screenshots_directory;
-          if (!recDir) { toast.error("Set recordings directory in Settings"); return; }
-          const ffmpegPath = await invoke<string>("resolve_ffmpeg", { userPath: settings.ffmpeg_path || null });
-          await invoke<string>("start_recording", {
-            recordingsDir: recDir, gameId: selectedGameId || "_general",
-            ffmpegPath, fps: settings.recording_fps || 30,
-            resolution: settings.recording_resolution === "native" ? null : settings.recording_resolution,
-            quality: settings.recording_quality || "medium",
-          });
-          toast.success("Recording started!");
-        }
-      } catch (e: any) { toast.error(`Recording: ${e}`); }
-    }).then((fn) => {
-      unlistenRecording = fn;
-    });
-
-    return () => {
-      unlistenBackup?.();
-      unlistenScreenshot?.();
-      unlistenRecording?.();
-    };
-  }, [
-    games,
-    selectedGameId,
-    settings.backup_directory,
-    settings.screenshots_directory,
-    settings.recordings_directory,
-  ]);
+  // Tray menu actions are now handled via Rust shortcuts module
+  // (tray.rs routes through shortcuts::handle_shortcut_action -> "shortcut-triggered" event)
+  // The shortcut-triggered listener above handles all actions.
 
   const updateSetting = useCallback(
     async (key: string, value: string) => {

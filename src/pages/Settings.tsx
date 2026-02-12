@@ -703,15 +703,7 @@ export default function Settings() {
                   </Button>
                 </div>
               </div>
-              <div>
-                <Label className="text-[10px]">Screenshot Shortcut</Label>
-                <Input
-                  value={settings.screenshot_shortcut}
-                  onChange={(e) => handleUpdate("screenshot_shortcut", e.target.value)}
-                  placeholder="Ctrl+Shift+S"
-                  className="mt-1 w-48 font-mono text-[10px]"
-                />
-              </div>
+
             </CardContent>
           </Card>
 
@@ -853,15 +845,6 @@ export default function Settings() {
                       <SelectItem value="854x480">854×480 (480p)</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div>
-                  <Label className="text-[10px]">Record Shortcut</Label>
-                  <Input
-                    value={settings.recording_shortcut}
-                    onChange={(e) => handleUpdate("recording_shortcut", e.target.value)}
-                    placeholder="F9"
-                    className="mt-1 font-mono text-[10px]"
-                  />
                 </div>
               </div>
             </CardContent>

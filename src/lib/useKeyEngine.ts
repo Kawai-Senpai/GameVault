@@ -3,7 +3,7 @@
  * Uses tauri-plugin-global-shortcut to intercept trigger keys and then simulates
  * target keys/macro actions via the Rust backend.
  */
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { comboToTauriShortcut, comboToVkSequence } from "@/lib/keycode-map";
 import type { KeyMapping, Macro, MacroAction } from "@/types";
@@ -111,20 +111,24 @@ function isRegisterable(combo: string): boolean {
 export function useKeyEngine(
   mappings: KeyMapping[],
   macros: Macro[],
-  enabled: boolean = true
+  enabled: boolean = true,
+  reservedShortcuts: string[] = []
 ) {
   const registeredRef = useRef<Set<string>>(new Set());
+  const reservedSignature = reservedShortcuts.join("||");
+  const reservedSet = useMemo(
+    () => new Set(reservedShortcuts.map((s) => comboToTauriShortcut(s).toLowerCase())),
+    [reservedSignature]
+  );
 
   const registerAll = useCallback(async () => {
     const plugin = await getShortcutPlugin();
     if (!plugin) return;
 
-    // Unregister previous
+    // Unregister previous shortcuts we registered
     for (const shortcut of registeredRef.current) {
       try {
-        if (await plugin.isRegistered(shortcut)) {
-          await plugin.unregister(shortcut);
-        }
+        await plugin.unregister(shortcut);
       } catch { /* ignore */ }
     }
     registeredRef.current.clear();
@@ -138,7 +142,10 @@ export function useKeyEngine(
 
       const tauriShortcut = comboToTauriShortcut(mapping.source_key);
       try {
-        if (await plugin.isRegistered(tauriShortcut)) continue;
+        // Skip if this shortcut is reserved for app-level actions (handled by Rust)
+        if (reservedSet.has(tauriShortcut.toLowerCase())) continue;
+        // Defensive: unregister first in case of stale registration
+        try { await plugin.unregister(tauriShortcut); } catch { /* noop */ }
         await plugin.register(tauriShortcut, async (event) => {
           if (event.state === "Pressed") {
             try {
@@ -161,9 +168,11 @@ export function useKeyEngine(
 
       const tauriShortcut = comboToTauriShortcut(macro.trigger_key);
       try {
-        // Skip if already registered (e.g. by a key mapping)
+        // Skip if already registered (e.g. by a key mapping) or reserved for app-level actions
         if (registeredRef.current.has(tauriShortcut)) continue;
-        if (await plugin.isRegistered(tauriShortcut)) continue;
+        if (reservedSet.has(tauriShortcut.toLowerCase())) continue;
+        // Defensive: unregister first in case of stale registration
+        try { await plugin.unregister(tauriShortcut); } catch { /* noop */ }
         await plugin.register(tauriShortcut, async (event) => {
           if (event.state === "Pressed") {
             try {
@@ -178,22 +187,27 @@ export function useKeyEngine(
         console.warn(`[KeyEngine] Could not register macro "${macro.name}" (${tauriShortcut}):`, err);
       }
     }
-  }, [mappings, macros, enabled]);
+  }, [mappings, macros, enabled, reservedSet]);
 
-  // Register on mount / when data changes
+  // Register on mount / when data changes.
+  // Small delay lets Rust-side app shortcuts register first to avoid conflicts.
   useEffect(() => {
-    void registerAll();
+    let cancelled = false;
+
+    const timer = window.setTimeout(() => {
+      if (!cancelled) void registerAll();
+    }, 100);
 
     return () => {
-      // Cleanup on unmount
+      cancelled = true;
+      window.clearTimeout(timer);
+      // Cleanup on unmount / re-fire
       (async () => {
         const plugin = await getShortcutPlugin();
         if (!plugin) return;
         for (const shortcut of registeredRef.current) {
           try {
-            if (await plugin.isRegistered(shortcut)) {
-              await plugin.unregister(shortcut);
-            }
+            await plugin.unregister(shortcut);
           } catch { /* ignore */ }
         }
         registeredRef.current.clear();

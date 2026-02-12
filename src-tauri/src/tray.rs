@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager,
+    Manager,
 };
 
 pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -79,15 +79,14 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                 }
-                // Use global emit so the event reaches even if window was hidden
-                let _ = app.emit("tray-quick-backup", ());
+                // Route through the same shortcut-triggered event
+                crate::shortcuts::handle_shortcut_action(app, "quick_backup");
             }
             "screenshot" => {
-                // Use global emit
-                let _ = app.emit("tray-take-screenshot", ());
+                crate::shortcuts::handle_shortcut_action(app, "take_screenshot");
             }
             "toggle_recording" => {
-                let _ = app.emit("tray-toggle-recording", ());
+                crate::shortcuts::handle_shortcut_action(app, "toggle_recording");
             }
             "overlay" => {
                 if let Some(overlay) = app.get_webview_window("overlay") {
