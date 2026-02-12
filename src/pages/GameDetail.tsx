@@ -866,7 +866,7 @@ export default function GameDetail() {
             </TabsTrigger>
             <TabsTrigger value="recordings" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-0 pb-2">
               <Video className="size-3 mr-1" /> Recordings
-              {recordings.length > 0 && <Badge variant="secondary" className="ml-1.5 text-[8px] px-1 py-0">{recordings.length}</Badge>}
+              <Badge variant="secondary" className="ml-1.5 text-[8px] px-1 py-0">{recordings.length}</Badge>
             </TabsTrigger>
             <TabsTrigger value="info" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-0 pb-2">
               <Sparkles className="size-3 mr-1" /> Info
