@@ -394,7 +394,7 @@ export default function Settings() {
           </Card>
 
           {/* ── AI Configuration ──────────────────────────────── */}
-          <Card>
+          <Card id="ai-configuration">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Sparkles className="size-3.5" /> AI Configuration

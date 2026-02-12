@@ -4,6 +4,12 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  saveConversation as dbSaveConversation,
+  getConversationById,
+  type ChatConversation as DbChatConversation,
+  type ChatMessage as DbChatMessage,
+} from "@/lib/database/chat-history.actions";
 import { toast } from "sonner";
 import { Bot, Camera, Globe, ImageIcon, Loader2, Send, Sparkles, Trash2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,6 +19,8 @@ interface ChatMsg {
   id: string;
   role: "user" | "assistant";
   content: string;
+  timestamp: number;
+  isStreaming?: boolean;
   imageBase64?: string; // attached screenshot (data URI)
 }
 
@@ -28,33 +36,209 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isWaitingResponse, setIsWaitingResponse] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [attachedImage, setAttachedImage] = useState<string | null>(null); // base64 data URI
   const [isCapturing, setIsCapturing] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
   const isOpenRouter = settings.ai_provider === "openrouter";
 
+  const resolveApiKey = (provider: string, values: Record<string, string>) => {
+    const providerKey =
+      provider === "openai"
+        ? (values.ai_openai_api_key || "").trim()
+        : (values.ai_openrouter_api_key || "").trim();
+    const genericKey = (values.ai_api_key || "").trim();
+    return providerKey || genericKey;
+  };
+
+  const streamAssistantText = async (fullText: string) => {
+    const assistantId = crypto.randomUUID();
+    const finalText = fullText || "No response.";
+    const total = finalText.length;
+    const step = total > 1000 ? 18 : total > 500 ? 10 : 6;
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        timestamp: Date.now(),
+        isStreaming: true,
+      },
+    ]);
+
+    for (let index = 0; index < total; index += step) {
+      await new Promise((resolve) => window.setTimeout(resolve, 12));
+      const next = finalText.slice(0, Math.min(total, index + step));
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantId
+            ? {
+                ...msg,
+                content: next,
+                isStreaming: next.length < total,
+              }
+            : msg
+        )
+      );
+    }
+
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === assistantId
+          ? {
+              ...msg,
+              isStreaming: false,
+            }
+          : msg
+      )
+    );
+  };
+
   // Periodically reload AI settings from DB (overlay is a separate window)
-  const [liveApiKey, setLiveApiKey] = useState(settings.ai_api_key);
-  const [liveProvider, setLiveProvider] = useState(settings.ai_provider);
+  const [liveApiKey, setLiveApiKey] = useState(
+    resolveApiKey(settings.ai_provider || "openrouter", {
+      ai_openrouter_api_key: settings.ai_openrouter_api_key || "",
+      ai_openai_api_key: settings.ai_openai_api_key || "",
+      ai_api_key: settings.ai_api_key || "",
+    })
+  );
+  const [liveProvider, setLiveProvider] = useState(settings.ai_provider || "openrouter");
   const [liveModel, setLiveModel] = useState(settings.ai_model);
+
+  const overlayConversationIdRef = useRef<string>("");
+  const overlayConversationTitle = gameName ? `Overlay · ${gameName}` : "Overlay Chat";
+
+  // Generate or restore a stable overlay conversation ID
+  useEffect(() => {
+    const stableKey = `overlay_${(gameName || exeName || "general").toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+    overlayConversationIdRef.current = stableKey;
+  }, [gameName, exeName]);
+
+  const toDbMessage = (message: ChatMsg): DbChatMessage => {
+    const rawImage =
+      message.imageBase64 && message.imageBase64.includes(",")
+        ? message.imageBase64.split(",")[1]
+        : message.imageBase64;
+
+    return {
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      timestamp: message.timestamp,
+      images: rawImage
+        ? [
+            {
+              id: `${message.id}_image`,
+              name: `overlay_${message.id}.png`,
+              base64: rawImage,
+              size: rawImage.length,
+            },
+          ]
+        : undefined,
+    };
+  };
+
+  const fromDbMessage = (message: DbChatMessage): ChatMsg | null => {
+    if (message.role !== "user" && message.role !== "assistant") return null;
+    const image = Array.isArray(message.images) && message.images.length > 0
+      ? `data:image/png;base64,${message.images[0].base64}`
+      : undefined;
+
+    return {
+      id: message.id,
+      role: message.role as "user" | "assistant",
+      content: message.content,
+      timestamp: message.timestamp || Date.now(),
+      imageBase64: image,
+    };
+  };
+
+  const readLiveAiConfig = async () => {
+    const db = await import("@tauri-apps/plugin-sql");
+    const conn = await db.default.load("sqlite:gamevault.db");
+    const rows = (await conn.select(
+      "SELECT key, value FROM settings WHERE key IN ('ai_provider', 'ai_openrouter_api_key', 'ai_openai_api_key', 'ai_api_key', 'ai_model')"
+    )) as { key: string; value: string }[];
+
+    const map: Record<string, string> = {};
+    rows.forEach((r) => {
+      map[r.key] = r.value;
+    });
+
+    const provider = (map.ai_provider || settings.ai_provider || "openrouter").trim();
+    const key = resolveApiKey(provider, map);
+    const model = (map.ai_model || settings.ai_model || "").trim();
+
+    return { provider, key, model };
+  };
+
+  // Restore overlay conversation from SQLite
+  useEffect(() => {
+    let cancelled = false;
+    const overlayId = overlayConversationIdRef.current;
+    if (!overlayId) return;
+
+    const restoreOverlayConversation = async () => {
+      try {
+        const conversation = await getConversationById(overlayId);
+        if (!conversation || !Array.isArray(conversation.messages) || conversation.messages.length === 0) return;
+
+        const restored = conversation.messages
+          .map(fromDbMessage)
+          .filter((msg): msg is ChatMsg => Boolean(msg));
+
+        if (!cancelled && restored.length > 0) {
+          setMessages(restored);
+        }
+      } catch (err) {
+        console.error("[OverlayChat] Failed to restore conversation:", err);
+      }
+    };
+
+    void restoreOverlayConversation();
+    return () => { cancelled = true; };
+  }, [gameName, exeName]);
+
+  // Persist overlay conversation to SQLite (same DB as main app)
+  useEffect(() => {
+    if (messages.length === 0 || messages.some((message) => message.isStreaming)) return;
+
+    const overlayId = overlayConversationIdRef.current;
+    if (!overlayId) return;
+
+    const persistOverlayConversation = async () => {
+      const now = Date.now();
+      const dbConversation: DbChatConversation = {
+        id: overlayId,
+        title: overlayConversationTitle,
+        createdAt: now, // will be ignored on update (only used for create)
+        updatedAt: now,
+        source: "overlay",
+        messages: messages
+          .filter((m) => !m.isStreaming)
+          .map(toDbMessage),
+      };
+
+      await dbSaveConversation(dbConversation);
+    };
+
+    void persistOverlayConversation().catch((err) => {
+      console.error("[OverlayChat] Failed to persist conversation:", err);
+    });
+  }, [messages, overlayConversationTitle]);
+
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
       try {
-        const db = await import("@tauri-apps/plugin-sql");
-        const conn = await db.default.load("sqlite:gamevault.db");
-        const rows = (await conn.select(
-          "SELECT key, value FROM settings WHERE key IN ('ai_provider', 'ai_openrouter_api_key', 'ai_openai_api_key', 'ai_model')"
-        )) as { key: string; value: string }[];
+        const live = await readLiveAiConfig();
         if (cancelled) return;
-        const map: Record<string, string> = {};
-        rows.forEach((r) => { map[r.key] = r.value; });
-        const provider = map.ai_provider || "openrouter";
-        const key = provider === "openai" ? map.ai_openai_api_key : map.ai_openrouter_api_key;
-        setLiveProvider(provider);
-        setLiveApiKey(key || "");
-        setLiveModel(map.ai_model || "");
+        setLiveProvider(live.provider);
+        setLiveApiKey(live.key);
+        setLiveModel(live.model);
       } catch { /* silent */ }
     };
     void poll();
@@ -129,29 +313,66 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
       id: crypto.randomUUID(),
       role: "user",
       content: userText || (attachedImage ? "(screenshot)" : ""),
+      timestamp: Date.now(),
       imageBase64: attachedImage || undefined,
     };
     setMessages((prev) => [...prev, userMsg]);
     setInputValue("");
     const capturedImage = attachedImage;
     setAttachedImage(null);
+
+    let activeProvider = liveProvider;
+    let activeApiKey = liveApiKey;
+    let activeModel = liveModel;
+
+    if (!activeApiKey || !activeProvider) {
+      try {
+        const live = await readLiveAiConfig();
+        activeProvider = live.provider;
+        activeApiKey = live.key;
+        activeModel = live.model;
+        setLiveProvider(live.provider);
+        setLiveApiKey(live.key);
+        setLiveModel(live.model);
+      } catch {
+      }
+    }
+
+    if (!activeApiKey || !activeProvider) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          timestamp: Date.now(),
+          content:
+            "AI is not configured yet. Open the main app and go to Settings → AI Configuration to add your provider API key, then try again.",
+        },
+      ]);
+      toast.error("AI is not configured. Configure provider API key in Settings.");
+      return;
+    }
+
     setIsStreaming(true);
+    setIsWaitingResponse(true);
 
     try {
       let response = "";
-      if (liveApiKey && liveProvider) {
-        let model = liveModel || "openai/gpt-5.2:online";
-        const liveIsOpenRouter = liveProvider === "openrouter";
-        if (webSearchEnabled && liveIsOpenRouter && !model.endsWith(":online")) model = `${model}:online`;
-        const apiUrl =
-          liveProvider === "openrouter"
-            ? "https://openrouter.ai/api/v1/chat/completions"
-            : liveProvider === "openai"
-              ? "https://api.openai.com/v1/chat/completions"
-              : `${liveProvider}/v1/chat/completions`;
+      let model = activeModel || "openai/gpt-5.2:online";
+      const liveIsOpenRouter = activeProvider === "openrouter";
+      if (webSearchEnabled && liveIsOpenRouter && !model.endsWith(":online")) model = `${model}:online`;
+      const apiUrl =
+        activeProvider === "openrouter"
+          ? "https://openrouter.ai/api/v1/chat/completions"
+          : activeProvider === "openai"
+            ? "https://api.openai.com/v1/chat/completions"
+            : `${activeProvider}/v1/chat/completions`;
 
-        // Build message history - convert to vision format if images are present
-        const apiMessages = messages.map((m) => {
+      const systemPrompt = buildOverlaySystemPrompt(gameName, exeName);
+
+      const apiMessages = [
+        { role: "system", content: systemPrompt },
+        ...messages.map((m) => {
           if (m.imageBase64) {
             return {
               role: m.role,
@@ -162,51 +383,54 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
             };
           }
           return { role: m.role, content: m.content };
-        });
+        }),
+      ];
 
-        // Add current message
-        if (capturedImage) {
-          apiMessages.push({
-            role: "user",
-            content: [
-              ...(userText ? [{ type: "text" as const, text: userText }] : []),
-              { type: "image_url" as const, image_url: { url: capturedImage } },
-            ],
-          });
-        } else {
-          apiMessages.push({ role: "user", content: userText });
-        }
-
-        const res = await tauriFetch(apiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${liveApiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: apiMessages,
-            max_tokens: 700,
-          }),
-        });
-        const data = (await res.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
-          error?: { message?: string };
-        };
-        if (data.error) throw new Error(data.error.message || "API error");
-        response = data.choices?.[0]?.message?.content || "No response.";
-      } else {
-        response = await invoke<string>("ai_chat", {
-          messages: [
-            ...messages.map((m) => ({ role: m.role, content: m.content })),
-            { role: "user", content: userText },
+      if (capturedImage) {
+        apiMessages.push({
+          role: "user",
+          content: [
+            ...(userText ? [{ type: "text" as const, text: userText }] : []),
+            { type: "image_url" as const, image_url: { url: capturedImage } },
           ],
         });
+      } else {
+        apiMessages.push({ role: "user", content: userText });
       }
-      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: response }]);
+
+      const res = await tauriFetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${activeApiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: apiMessages,
+          max_tokens: 700,
+        }),
+      });
+      const data = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+        error?: { message?: string };
+      };
+      if (data.error) throw new Error(data.error.message || "API error");
+      response = data.choices?.[0]?.message?.content || "No response.";
+      setIsWaitingResponse(false);
+      await streamAssistantText(response);
     } catch (err) {
       toast.error(`AI: ${err}`);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          timestamp: Date.now(),
+          content: "I couldn't complete that request. Check AI Configuration in Settings and try again.",
+        },
+      ]);
     } finally {
+      setIsWaitingResponse(false);
       setIsStreaming(false);
     }
   };
@@ -221,7 +445,13 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
   }, [autoSendPending]);
 
   // Show setup guide if no API key
-  const hasApiKey = !!(liveApiKey && liveProvider);
+  const fallbackProvider = settings.ai_provider || "openrouter";
+  const fallbackKey = resolveApiKey(fallbackProvider, {
+    ai_openrouter_api_key: settings.ai_openrouter_api_key || "",
+    ai_openai_api_key: settings.ai_openai_api_key || "",
+    ai_api_key: settings.ai_api_key || "",
+  });
+  const hasApiKey = !!((liveApiKey || fallbackKey).trim() && (liveProvider || fallbackProvider).trim());
 
   return (
     <div className="flex flex-col h-full">
@@ -260,7 +490,7 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
                 Supports OpenRouter and OpenAI.
               </p>
               <p className="text-[7px] text-white/20 mt-2">
-                Without an API key, only basic local responses are available.
+                Without an API key, chat is disabled.
               </p>
             </div>
           )}
@@ -310,7 +540,12 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
                   </div>
                 )}
                 {msg.content && msg.content !== "(screenshot)" && (
-                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                  <p className="whitespace-pre-wrap break-words">
+                    {msg.content}
+                    {msg.isStreaming && (
+                      <span className="inline-block size-1 rounded-full bg-current align-middle ml-1 animate-pulse" />
+                    )}
+                  </p>
                 )}
               </div>
               {msg.role === "user" && (
@@ -320,6 +555,20 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
               )}
             </div>
           ))}
+          {isWaitingResponse && (
+            <div className="flex gap-1.5 justify-start">
+              <div className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-primary/20">
+                <Bot className="size-2 text-primary" />
+              </div>
+              <div className="bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1">
+                <div className="flex items-center gap-1">
+                  <div className="size-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <div className="size-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: "140ms" }} />
+                  <div className="size-1 rounded-full bg-primary animate-bounce" style={{ animationDelay: "280ms" }} />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </ScrollArea>
 
@@ -380,6 +629,7 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
           }}
           placeholder={attachedImage ? "Describe what you see..." : "Ask anything..."}
           className="h-6 text-[9px] bg-white/5 border-white/10 text-white placeholder:text-white/30 flex-1 min-w-0"
+          disabled={isStreaming}
         />
         <Button
           size="icon"
@@ -393,4 +643,17 @@ export default function OverlayChat({ settings, gameName, exeName, initialMessag
       </div>
     </div>
   );
+}
+
+function buildOverlaySystemPrompt(gameName?: string, exeName?: string): string {
+  let prompt = "You are GameVault AI, the in-app assistant for GameVault. You are a practical gaming assistant focused on the user’s immediate request.\n\nProduct context:\n- GameVault is created by Ranit Bhowmick (ranitbhowmick.com)\n- Support email: mail@ranitbhowmick.com\n\nYour scope:\n- Help with game mechanics, quests, item descriptions, progression tips, builds, and troubleshooting\n- Help with save/backups/restores only when asked\n- Keep guidance concise and actionable for real players\n\nRules:\n- For greetings or short openers, respond naturally and ask what they need\n- Do not push backup/save guidance unless requested\n- Keep responses compact in overlay mode\n- If uncertain, say so and provide a safe next step\n- Do not invent game facts. Suggest to use the web icon in the overlay to perform actual web search if you dont know something.";
+
+  if (gameName) {
+    prompt += `\n\nCurrent game context: ${gameName}.`;
+  }
+  if (exeName) {
+    prompt += ` Executable hint: ${exeName}.`;
+  }
+
+  return prompt;
 }

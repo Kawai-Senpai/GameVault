@@ -316,6 +316,16 @@ pub fn run() {
                             "#,
                             kind: tauri_plugin_sql::MigrationKind::Up,
                         },
+                        // Migration 10: Add metadata to ai_messages and source to ai_conversations
+                        tauri_plugin_sql::Migration {
+                            version: 10,
+                            description: "Add metadata column to ai_messages and source column to ai_conversations",
+                            sql: r#"
+                                ALTER TABLE ai_messages ADD COLUMN metadata TEXT;
+                                ALTER TABLE ai_conversations ADD COLUMN source TEXT DEFAULT 'main';
+                            "#,
+                            kind: tauri_plugin_sql::MigrationKind::Up,
+                        },
                     ],
                 )
                 .build(),
@@ -439,29 +449,53 @@ pub fn position_overlay_strip(overlay: &tauri::WebviewWindow<tauri::Wry>) {
     }
 }
 
+fn ensure_overlay_window(
+    app: &tauri::AppHandle,
+) -> Result<tauri::WebviewWindow<tauri::Wry>, String> {
+    if let Some(existing) = app.get_webview_window("overlay") {
+        return Ok(existing);
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        app,
+        "overlay",
+        tauri::WebviewUrl::App("/?window=overlay".into()),
+    )
+    .title("Game Vault Overlay")
+    .inner_size(700.0, 54.0)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .resizable(false)
+    .skip_taskbar(true)
+    .visible(false)
+    .focused(false)
+    .shadow(false)
+    .build()
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn toggle_overlay(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(overlay) = app.get_webview_window("overlay") {
-        if overlay.is_visible().unwrap_or(false) {
-            overlay.hide().map_err(|e| e.to_string())?;
-        } else {
-            games::cache_foreground_window_snapshot();
-            position_overlay_strip(&overlay);
-            overlay.show().map_err(|e| e.to_string())?;
-            overlay.set_focus().map_err(|e| e.to_string())?;
-        }
+    let overlay = ensure_overlay_window(&app)?;
+    if overlay.is_visible().unwrap_or(false) {
+        overlay.hide().map_err(|e| e.to_string())?;
+    } else {
+        games::cache_foreground_window_snapshot();
+        position_overlay_strip(&overlay);
+        overlay.show().map_err(|e| e.to_string())?;
+        overlay.set_focus().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
 async fn show_overlay(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(overlay) = app.get_webview_window("overlay") {
-        games::cache_foreground_window_snapshot();
-        position_overlay_strip(&overlay);
-        overlay.show().map_err(|e| e.to_string())?;
-        overlay.set_focus().map_err(|e| e.to_string())?;
-    }
+    let overlay = ensure_overlay_window(&app)?;
+    games::cache_foreground_window_snapshot();
+    position_overlay_strip(&overlay);
+    overlay.show().map_err(|e| e.to_string())?;
+    overlay.set_focus().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -704,24 +738,6 @@ struct ChatMsg {
 }
 
 #[tauri::command]
-async fn ai_chat(messages: Vec<ChatMsg>) -> Result<String, String> {
-    // Placeholder: Returns a helpful local response.
-    // In production, this would call OpenRouter/OpenAI API using
-    // the user's configured API key from settings.
-    let last = messages
-        .last()
-        .map(|m| m.content.as_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    let response = if last.contains("save") && (last.contains("where") || last.contains("location"))
-    {
-        "Most PC game saves are found in:\n• %APPDATA% (Roaming)\n• %LOCALAPPDATA%\n• Documents\\My Games\\\n• Steam: steamapps\\common\\<game>\\saves\n\nUse GameVault's auto-detect to find them automatically."
-    } else if last.contains("backup") {
-        "Backup tips:\n1. Back up before major updates\n2. Use descriptive names for backups\n3. Enable auto-backup in Settings\n4. Test restores periodically\n5. Keep cloud + local copies"
-    } else {
-        "I can help with save locations, backup strategies, and gaming tips. What would you like to know?"
-    };
-
-    Ok(response.to_string())
+async fn ai_chat(_messages: Vec<ChatMsg>) -> Result<String, String> {
+    Err("AI_NOT_CONFIGURED: Configure your provider and API key in Settings > AI Configuration.".to_string())
 }
