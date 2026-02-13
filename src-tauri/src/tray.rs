@@ -95,8 +95,7 @@ pub fn build_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         crate::games::cache_foreground_window_snapshot();
                         crate::position_overlay_strip(&overlay);
-                        let _ = overlay.show();
-                        let _ = overlay.set_focus();
+                        crate::show_overlay_no_activate(&overlay);
                     }
                 }
             }

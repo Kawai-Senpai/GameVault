@@ -140,7 +140,7 @@ pub fn update_shortcuts(
 pub fn handle_shortcut_action(app: &tauri::AppHandle, action: &str) {
     match action {
         "toggle_overlay" => {
-            // Directly toggle overlay visibility
+            // Directly toggle overlay visibility without stealing focus
             if let Some(overlay) = app.get_webview_window("overlay") {
                 if overlay.is_visible().unwrap_or(false) {
                     let _ = overlay.hide();
@@ -148,8 +148,8 @@ pub fn handle_shortcut_action(app: &tauri::AppHandle, action: &str) {
                     // Cache foreground before showing overlay
                     crate::games::cache_foreground_window_snapshot();
                     crate::position_overlay_strip(&overlay);
-                    let _ = overlay.show();
-                    let _ = overlay.set_focus();
+                    // Show without stealing focus (won't minimize the game)
+                    crate::show_overlay_no_activate(&overlay);
                 }
             }
         }

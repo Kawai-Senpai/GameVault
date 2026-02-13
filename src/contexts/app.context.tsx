@@ -312,6 +312,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 [result.id, currentGameId || "_general", result.file_path, result.thumbnail_path, result.width, result.height, result.file_size]
               );
               toast.success("Screenshot captured!");
+              try {
+                const gameName = currentGames.find((g) => g.id === (currentGameId || "_general"))?.name || "Screen";
+                sendNotification({
+                  title: "Screenshot Captured",
+                  body: `${gameName} · ${result.width}×${result.height}`,
+                });
+              } catch { /* notification may be blocked */ }
             } catch (e) { toast.error(`Screenshot failed: ${e}`); }
             break;
           }
@@ -353,6 +360,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                    result.width, result.height, result.file_size, result.duration_seconds, s.recording_fps || 30]
                 );
                 toast.success("Recording saved!");
+                try {
+                  sendNotification({
+                    title: "Recording Saved",
+                    body: `${Math.floor(result.duration_seconds / 60)}m ${Math.floor(result.duration_seconds % 60)}s · ${result.width}×${result.height}`,
+                  });
+                } catch { /* notification may be blocked */ }
               } else {
                 const recDir = s.recordings_directory || s.screenshots_directory;
                 if (!recDir) { toast.error("Set recordings directory in Settings"); return; }
@@ -366,6 +379,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   quality: s.recording_quality || "medium",
                 });
                 toast.success("Recording started!");
+                try {
+                  sendNotification({
+                    title: "Recording Started",
+                    body: `Recording at ${s.recording_fps || 30} FPS`,
+                  });
+                } catch { /* notification may be blocked */ }
               }
             } catch (e: any) { toast.error(`Recording: ${e}`); }
             break;
@@ -722,6 +741,59 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     loadSettings();
   }, []);
+
+  // ── Overlay mode: poll settings from DB every 3s to stay in sync with main window ──
+  // The overlay is a separate React tree, so its AppProvider doesn't share state
+  // with the main window. Settings changed in the main window (like screenshots_directory)
+  // would otherwise stay stale in the overlay until full restart.
+  useEffect(() => {
+    if (!isOverlay || !settingsLoaded) return;
+
+    let cancelled = false;
+    const pollSettings = async () => {
+      if (cancelled) return;
+      try {
+        const db = await import("@tauri-apps/plugin-sql");
+        const conn = await db.default.load("sqlite:gamevault.db");
+        const rows = (await conn.select("SELECT key, value FROM settings")) as {
+          key: string;
+          value: string;
+        }[];
+
+        if (cancelled) return;
+
+        const loaded = { ...defaultSettings };
+        for (const row of rows) {
+          const key = row.key as keyof AppSettings;
+          if (key in loaded) {
+            if (BOOLEAN_KEYS.has(key)) {
+              (loaded as unknown as Record<string, unknown>)[key] = row.value === "true" || row.value === "1";
+            } else if (NUMBER_KEYS.has(key)) {
+              (loaded as unknown as Record<string, unknown>)[key] = parseInt(row.value) || (defaultSettings as unknown as Record<string, unknown>)[key];
+            } else {
+              (loaded as unknown as Record<string, unknown>)[key] = row.value;
+            }
+          }
+        }
+
+        if (loaded.ai_provider === "openai") {
+          loaded.ai_api_key = loaded.ai_openai_api_key;
+        } else {
+          loaded.ai_api_key = loaded.ai_openrouter_api_key;
+        }
+
+        setSettings(loaded);
+      } catch {
+        // silent - non-critical
+      }
+    };
+
+    const timer = window.setInterval(pollSettings, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isOverlay, settingsLoaded]);
 
   // Load games from SQLite
   useEffect(() => {

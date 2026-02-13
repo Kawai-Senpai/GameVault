@@ -182,6 +182,101 @@ mod windows_detect {
             || title.contains("toolbox")
     }
 
+    /// Blacklisted process names — system utilities, shells, IDEs, and tools
+    /// that should never be detected as "games" in the overlay.
+    fn is_blacklisted_process(process_name: &str, exe_path: &str, title: &str) -> bool {
+        let pn = process_name.to_lowercase();
+        let ep = exe_path.to_lowercase();
+        let tl = title.to_lowercase();
+
+        // GameVault itself
+        if pn.contains("gamevault") || ep.contains("gamevault") || tl.contains("gamevault") || tl.contains("toolbox") {
+            return true;
+        }
+
+        // Common blacklisted process names
+        const BLACKLISTED_NAMES: &[&str] = &[
+            // System shells / terminals
+            "cmd.exe", "powershell.exe", "pwsh.exe", "conhost.exe",
+            "windowsterminal.exe", "wt.exe", "mintty.exe",
+            // Python
+            "python.exe", "pythonw.exe", "py.exe", "python3.exe",
+            // Node / JS
+            "node.exe", "npm.exe", "npx.exe", "bun.exe", "deno.exe",
+            // IDEs / Editors
+            "code.exe", "devenv.exe", "rider64.exe", "idea64.exe",
+            "sublime_text.exe", "notepad.exe", "notepad++.exe",
+            "atom.exe", "fleet.exe", "zed.exe", "windsurf.exe",
+            // Browsers
+            "chrome.exe", "firefox.exe", "msedge.exe", "opera.exe",
+            "brave.exe", "vivaldi.exe", "arc.exe", "thorium.exe",
+            "chromium.exe", "iexplore.exe", "safari.exe",
+            // Communication / media
+            "discord.exe", "discordptb.exe", "discordcanary.exe",
+            "slack.exe", "teams.exe", "zoom.exe", "telegram.exe",
+            "whatsapp.exe", "signal.exe", "skype.exe",
+            "spotify.exe", "wmplayer.exe", "vlc.exe", "mpv.exe",
+            // System processes
+            "explorer.exe", "taskmgr.exe", "systemsettings.exe",
+            "searchhost.exe", "startmenuexperiencehost.exe",
+            "shellexperiencehost.exe", "applicationframehost.exe",
+            "textinputhost.exe", "runtimebroker.exe",
+            "smartscreen.exe", "securityhealthsystray.exe",
+            "lockapp.exe", "logonui.exe", "credentialuibroker.exe",
+            // Windows core
+            "svchost.exe", "csrss.exe", "dwm.exe", "lsass.exe",
+            "winlogon.exe", "services.exe", "sihost.exe",
+            "ctfmon.exe", "fontdrvhost.exe", "dllhost.exe",
+            // Dev tools
+            "git.exe", "ssh.exe", "cargo.exe", "rustc.exe",
+            "java.exe", "javaw.exe", "dotnet.exe",
+            "docker.exe", "wsl.exe", "bash.exe",
+            // OEM companion apps (MSI, Lenovo, ASUS, Acer, Dell, HP, etc.)
+            "dragoncenter.exe", "msicenter.exe", "mysticlight.exe",
+            "lenovovantage.exe", "lenovonow.exe",
+            "araborycrate.exe", "armourycrate.exe", "aborycrate.exe",
+            "asusoptimization.exe", "asus_framework.exe",
+            "predatorsense.exe", "nitrosense.exe", "acerquickaccessservice.exe",
+            "dellsupportassist.exe", "supportassist.exe",
+            "oasisservice.exe", "hpcommandcenter.exe",
+            "razersynapse.exe", "razercentral.exe",
+            "corsair.service.exe", "icue.exe",
+            "lghub.exe", "lghub_agent.exe",
+            "nzxtcam.exe", "camservice.exe",
+            "steelseries gg.exe", "steelseriesengine.exe",
+            // Antivirus / security
+            "avp.exe", "avgui.exe", "avguard.exe",
+            "msmpeng.exe", "nissrv.exe", "mpcmdrun.exe",
+            // Package managers / build tools
+            "msiexec.exe", "setup.exe", "installer.exe",
+            // Sound / audio
+            "soundvolumeview.exe", "nahimicservice.exe", "nahimicsvc.exe",
+            "realtek.exe", "ravbg64.exe", "audiodg.exe",
+            // GPU companion (not launchers — those are game-related)
+            "nvspcaps64.exe", "nvcontainer.exe",
+            "amdrsserv.exe", "amddvr.exe",
+        ];
+
+        let pn_file = pn.split(['/', '\\']).last().unwrap_or(&pn);
+        for &bl in BLACKLISTED_NAMES {
+            if pn_file == bl || pn == bl {
+                return true;
+            }
+        }
+
+        // Blacklist by exe_path patterns
+        let ep_lower = ep.replace('/', "\\");
+        if ep_lower.contains("\\windows\\system32\\")
+            || ep_lower.contains("\\windows\\syswow64\\")
+            || ep_lower.contains("\\microsoft vs code\\")
+            || ep_lower.contains("\\windowsapps\\")
+        {
+            return true;
+        }
+
+        false
+    }
+
     pub fn list_running_windows() -> Vec<RunningWindowInfo> {
         let windows = enum_visible_windows();
         let foreground = foreground_pid();
@@ -206,6 +301,11 @@ mod windows_detect {
             };
 
             if looks_like_ours(&process_name, &exe_path, &title) {
+                continue;
+            }
+
+            // Skip blacklisted system/dev/tool processes
+            if is_blacklisted_process(&process_name, &exe_path, &title) {
                 continue;
             }
 

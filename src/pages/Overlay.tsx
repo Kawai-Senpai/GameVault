@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { sendNotification } from "@tauri-apps/plugin-notification";
 import { useApp } from "@/contexts/app.context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,30 +110,9 @@ export default function Overlay() {
     };
   }, []);
 
-  // Poll overlay_opacity from DB so changes made in Settings (separate window) are reflected live.
-  // The main window and overlay are separate React trees - they don't share React state.
-  const [liveOpacity, setLiveOpacity] = useState(settings.overlay_opacity);
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const db = await import("@tauri-apps/plugin-sql");
-        const conn = await db.default.load("sqlite:gamevault.db");
-        const rows = (await conn.select(
-          "SELECT value FROM settings WHERE key = 'overlay_opacity'"
-        )) as { value: string }[];
-        if (!cancelled && rows[0]) {
-          const val = parseInt(rows[0].value);
-          if (!isNaN(val) && val >= 0 && val <= 100) {
-            setLiveOpacity(val);
-          }
-        }
-      } catch { /* silent */ }
-    };
-    void poll();
-    const timer = window.setInterval(poll, 2000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, []);
+  // Overlay opacity: now synced automatically via AppProvider's periodic settings poll.
+  // No need for separate DB polling - settings.overlay_opacity stays fresh.
+  const liveOpacity = settings.overlay_opacity;
 
   const selectedGame = games.find((g) => g.id === selectedGameId) || null;
   const selectedWindow = runningWindows.find((w) => windowKey(w) === selectedWindowKey) || null;
@@ -147,8 +127,63 @@ export default function Overlay() {
   );
 
   const matchedGame = useMemo(
-    () => findGameByExe(selectedWindow?.exe_path),
-    [findGameByExe, selectedWindow?.exe_path]
+    () => {
+      // Priority 1: Match the foreground/selected window exe_path against known games.
+      const fgMatch = findGameByExe(selectedWindow?.exe_path);
+      if (fgMatch) return fgMatch;
+
+      // Priority 2: Fuzzy match the foreground window title/process against game names.
+      if (selectedWindow) {
+        const titleLower = (selectedWindow.title || "").toLowerCase();
+        const processLower = (selectedWindow.process_name || "").toLowerCase();
+        const exeName = (selectedWindow.exe_path || "").split(/[/\\]/).pop()?.replace(/\.exe$/i, "").toLowerCase() || "";
+        for (const g of games) {
+          if (g.name.length < 2) continue;
+          const gameLower = g.name.toLowerCase();
+          if (
+            titleLower.includes(gameLower) ||
+            processLower.includes(gameLower) ||
+            gameLower.includes(exeName) ||
+            exeName.includes(gameLower)
+          ) {
+            return g;
+          }
+        }
+      }
+
+      // Priority 3: Check ALL running windows for exe_path match against games in library.
+      // This catches fullscreen games where GetForegroundWindow might return a system process
+      // instead of the game. ONLY matches by exact exe_path (set in game library).
+      for (const w of runningWindows) {
+        if (selectedWindow && windowKey(w) === selectedWindowKey) continue;
+        const exeMatch = findGameByExe(w.exe_path);
+        if (exeMatch) {
+          // Found a known game running — auto-select it
+          setSelectedWindowKey(windowKey(w));
+          return exeMatch;
+        }
+      }
+
+      // Priority 4: Fuzzy match ALL running window titles against game names in library.
+      // Only matches if the game name is IN the window title (or vice versa).
+      for (const w of runningWindows) {
+        if (selectedWindow && windowKey(w) === selectedWindowKey) continue;
+        const titleLower = (w.title || "").toLowerCase();
+        const processLower = (w.process_name || "").toLowerCase();
+        for (const g of games) {
+          if (g.name.length < 3) continue;
+          const gameLower = g.name.toLowerCase();
+          if (titleLower.includes(gameLower) || processLower.includes(gameLower)) {
+            setSelectedWindowKey(windowKey(w));
+            return g;
+          }
+        }
+      }
+
+      return null;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [findGameByExe, selectedWindow, runningWindows, games, selectedWindowKey]
   );
 
   // Track current session start when a game is detected
@@ -319,6 +354,31 @@ export default function Overlay() {
     })();
   }, [refreshWindows]);
 
+  // Periodically refresh running windows for accurate game detection.
+  // The overlay stays mounted even when hidden, so we poll every 5s.
+  // Also refresh on visibility change (when overlay is shown via shortcut).
+  useEffect(() => {
+    const timer = window.setInterval(refreshWindows, 5000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void refreshWindows();
+        // Re-read the cached foreground window (captured right before overlay was shown)
+        invoke<RunningWindowInfo | null>("get_last_foreground_window")
+          .then((snap) => {
+            if (snap) setSelectedWindowKey(windowKey(snap));
+          })
+          .catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [refreshWindows]);
+
   useEffect(() => {
     if (!selectedGameId && matchedGame) setSelectedGameId(matchedGame.id);
   }, [matchedGame, selectedGameId]);
@@ -478,7 +538,20 @@ export default function Overlay() {
       }
       return;
     }
-    if (!settings.screenshots_directory) {
+
+    // Always read fresh screenshots_directory from DB (overlay has a separate React tree
+    // and settings might be stale if user changed them in the main window)
+    let screenshotDir = settings.screenshots_directory;
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      const rows = (await conn.select(
+        "SELECT value FROM settings WHERE key = 'screenshots_directory'"
+      )) as { value: string }[];
+      if (rows[0]?.value) screenshotDir = rows[0].value;
+    } catch { /* use context value */ }
+
+    if (!screenshotDir) {
       showWizard("screenshot-dir");
       return;
     }
@@ -504,7 +577,7 @@ export default function Overlay() {
         height: number;
         file_size: number;
       }>("save_screenshot_file", {
-        screenshotsDir: settings.screenshots_directory,
+        screenshotsDir: screenshotDir,
         gameId: game.id,
         base64Data: base64,
       });
@@ -517,6 +590,12 @@ export default function Overlay() {
       showStatus(`Screenshot saved`);
       showSuccess("screenshot", `${result.width}×${result.height} · ${formatBytes(result.file_size)}`);
       toast.success("Screenshot captured and saved");
+      try {
+        sendNotification({
+          title: "Screenshot Captured",
+          body: `${game.name} · ${result.width}×${result.height}`,
+        });
+      } catch { /* notification may be blocked */ }
     } catch (err) {
       // Ensure overlay is visible again on error
       try {
@@ -625,6 +704,12 @@ export default function Overlay() {
           : `${Math.floor(result.duration_seconds)}s`;
         showSuccess("recording", `${durStr} · ${result.width}×${result.height} · ${formatBytes(result.file_size)}`);
         toast.success("Recording saved");
+        try {
+          sendNotification({
+            title: "Recording Saved",
+            body: `${durStr} · ${result.width}×${result.height}`,
+          });
+        } catch { /* notification may be blocked */ }
       } catch (err) {
         toast.error(`Stop recording failed: ${err}`);
         setIsRecording(false);
@@ -666,6 +751,12 @@ export default function Overlay() {
         setRecordingDuration(0);
         showStatus("Recording started");
         toast.success("Recording started");
+        try {
+          sendNotification({
+            title: "Recording Started",
+            body: `Recording at ${settings.recording_fps || 30} FPS`,
+          });
+        } catch { /* notification may be blocked */ }
 
         // Start duration timer
         const startTime = Date.now();
@@ -695,7 +786,19 @@ export default function Overlay() {
       }
       return;
     }
-    if (!settings.backup_directory) {
+
+    // Always read fresh backup_directory from DB (overlay has a separate React tree)
+    let backupDir = settings.backup_directory;
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      const rows = (await conn.select(
+        "SELECT value FROM settings WHERE key = 'backup_directory'"
+      )) as { value: string }[];
+      if (rows[0]?.value) backupDir = rows[0].value;
+    } catch { /* use context value */ }
+
+    if (!backupDir) {
       showWizard("backup-dir");
       return;
     }
@@ -716,7 +819,7 @@ export default function Overlay() {
         skipped_duplicate: boolean;
         message: string;
       }>("create_backup", {
-        backupDir: settings.backup_directory,
+        backupDir: backupDir,
         gameId: game.id,
         gameName: game.name,
         savePath,
@@ -769,6 +872,18 @@ export default function Overlay() {
       setRestoreConfirm(false);
       return;
     }
+
+    // Read fresh backup_directory from DB
+    let backupDirRestore = settings.backup_directory;
+    try {
+      const db = await import("@tauri-apps/plugin-sql");
+      const conn = await db.default.load("sqlite:gamevault.db");
+      const rows = (await conn.select(
+        "SELECT value FROM settings WHERE key = 'backup_directory'"
+      )) as { value: string }[];
+      if (rows[0]?.value) backupDirRestore = rows[0].value;
+    } catch { /* use context value */ }
+
     showStatus("Restoring...");
     try {
       const savePath = await invoke<string>("expand_env_path", { path: game.save_paths[0] });
@@ -776,7 +891,7 @@ export default function Overlay() {
         zipPath: lastBackup.file_path,
         restorePath: savePath,
         createSafetyBackup: true,
-        backupDir: settings.backup_directory,
+        backupDir: backupDirRestore,
         gameId: game.id,
         gameName: game.name,
       });
@@ -1030,6 +1145,8 @@ export default function Overlay() {
           <Input
             value={quickInput}
             onChange={(e) => setQuickInput(e.target.value)}
+            onFocus={() => invoke("unlock_overlay").catch(() => {})}
+            onBlur={() => invoke("lock_overlay").catch(() => {})}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && quickInput.trim()) {
                 e.preventDefault();

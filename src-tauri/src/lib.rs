@@ -7,6 +7,7 @@ mod recording;
 mod screenshots;
 mod shortcuts;
 mod tray;
+mod window;
 
 use tauri::Manager;
 
@@ -303,9 +304,12 @@ pub fn run() {
                 let _ = main_window.set_icon(icon);
             }
 
-            // Hide overlay window on startup
+            // Hide overlay window on startup and apply no-activate flag
             if let Some(overlay) = app.get_webview_window("overlay") {
                 let _ = overlay.hide();
+                // Apply WS_EX_NOACTIVATE so overlay never steals focus from games
+                #[cfg(target_os = "windows")]
+                window::apply_no_activate(&overlay);
             }
 
             tracing::info!("GameVault initialized successfully");
@@ -370,6 +374,8 @@ pub fn run() {
             hide_overlay,
             set_overlay_position,
             set_overlay_height,
+            window::lock_overlay,
+            window::unlock_overlay,
             // Startup behavior
             set_launch_on_startup,
             is_launch_on_startup_enabled,
@@ -402,6 +408,23 @@ pub fn run() {
 
 // ─── Overlay Commands ──────────────────────────────────────────
 
+/// Show the overlay window without stealing focus from the current foreground app (game).
+/// Uses direct Windows API: ShowWindow(SW_SHOWNOACTIVATE) to show without activation.
+/// On other platforms: falls back to regular show().
+pub fn show_overlay_no_activate(overlay: &tauri::WebviewWindow<tauri::Wry>) {
+    #[cfg(target_os = "windows")]
+    {
+        window::show_no_activate(overlay);
+        window::apply_no_activate(overlay);
+        return;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = overlay.show();
+    }
+}
+
 /// Position the overlay strip at top-center of the primary monitor
 pub fn position_overlay_strip(overlay: &tauri::WebviewWindow<tauri::Wry>) {
     if let Ok(Some(monitor)) = overlay.primary_monitor() {
@@ -430,7 +453,7 @@ fn ensure_overlay_window(
         return Ok(existing);
     }
 
-    tauri::WebviewWindowBuilder::new(
+    let overlay = tauri::WebviewWindowBuilder::new(
         app,
         "overlay",
         tauri::WebviewUrl::App("/?window=overlay".into()),
@@ -446,7 +469,13 @@ fn ensure_overlay_window(
     .focused(false)
     .shadow(false)
     .build()
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+
+    // Apply WS_EX_NOACTIVATE so the recreated overlay never steals focus
+    #[cfg(target_os = "windows")]
+    window::apply_no_activate(&overlay);
+
+    Ok(overlay)
 }
 
 #[tauri::command]
@@ -457,8 +486,7 @@ async fn toggle_overlay(app: tauri::AppHandle) -> Result<(), String> {
     } else {
         games::cache_foreground_window_snapshot();
         position_overlay_strip(&overlay);
-        overlay.show().map_err(|e| e.to_string())?;
-        overlay.set_focus().map_err(|e| e.to_string())?;
+        show_overlay_no_activate(&overlay);
     }
     Ok(())
 }
@@ -468,8 +496,7 @@ async fn show_overlay(app: tauri::AppHandle) -> Result<(), String> {
     let overlay = ensure_overlay_window(&app)?;
     games::cache_foreground_window_snapshot();
     position_overlay_strip(&overlay);
-    overlay.show().map_err(|e| e.to_string())?;
-    overlay.set_focus().map_err(|e| e.to_string())?;
+    show_overlay_no_activate(&overlay);
     Ok(())
 }
 
