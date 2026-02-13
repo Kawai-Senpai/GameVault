@@ -1,6 +1,6 @@
 [package]
 name = "gamevault"
-version = "2.0.0"
+version = "2.1.0"
 description = "GameVault - The ultimate game save manager"
 authors = ["Ranit Bhowmick <main@ranitbhowmick.com>"]
 license = "MIT"

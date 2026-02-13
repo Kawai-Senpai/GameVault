@@ -1057,7 +1057,7 @@ export default function Settings() {
               <div className="space-y-1.5 text-[10px] text-muted-foreground">
                 <div className="flex justify-between">
                   <span>Version</span>
-                  <Badge variant="secondary" className="text-[8px]">2.0.0-alpha</Badge>
+                  <Badge variant="secondary" className="text-[8px]">2.1.0</Badge>
                 </div>
                 <div className="flex justify-between">
                   <span>Games in library</span>

@@ -123,7 +123,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [setupComplete, setSetupComplete] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [version, setVersion] = useState("2.0.0");
+  const [version, setVersion] = useState("2.1.0");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [autoBackupStatus, setAutoBackupStatus] = useState<AutoBackupStatus>({
     running: false,
